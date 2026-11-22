@@ -254,9 +254,14 @@ func collectStatus(ctx context.Context, confPath string, noCWD bool) statusRepor
 		rep.Error = err.Error()
 		var b strings.Builder
 		b.WriteString("OpenSearch is not reachable at ")
-		b.WriteString(config.RedactURL(cfg.OpenSearchURL))
+		b.WriteString(rep.URL)
+		if len(rep.URLs) > 1 {
+			b.WriteString(" (nodes: ")
+			b.WriteString(strings.Join(rep.URLs, ", "))
+			b.WriteString(")")
+		}
 		b.WriteString(". Check that the server is running and that opensearch_url / " +
-			"opensearch_user / opensearch_password are correct (config file: ")
+			"opensearch_urls / opensearch_user / opensearch_password are correct (config file: ")
 		b.WriteString(configPathOrNone(rep.ConfigFile))
 		b.WriteString(").")
 		b.WriteString(envNote(rep))

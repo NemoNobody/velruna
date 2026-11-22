@@ -289,10 +289,49 @@ func TestLoadConfig_EnvOverride(t *testing.T) {
 	}
 }
 
-// TestLoadConfig_HistoryLimit pins the per-key history retention knob: an
-// explicit file value overrides the default, an explicit 0 means "keep
-// everything" and must survive decoding (the *int in fileConfig exists for
-// exactly this distinction).
+// An explicit OPENSEARCH_URL must beat a node list from the file: the list
+// wins in EffectiveURLs, so without clearing it the env override would be
+// silently ignored ("environment always overrides the file").
+func TestLoadConfig_EnvURLOverridesFileList(t *testing.T) {
+	dir := t.TempDir()
+	restore := chdir(t, dir)
+	defer restore()
+	fc := filepath.Join(dir, "velruna.conf")
+	if err := os.WriteFile(fc, []byte(`{
+  "opensearch_url": "https://file:9200",
+  "opensearch_urls": ["https://node1:9200", "https://node2:9200"]
+}`), 0644); err != nil {
+		t.Fatalf("write velruna.conf: %v", err)
+	}
+	t.Setenv("OPENSEARCH_URL", "https://env:9200")
+	cfg, err := LoadConfig()
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	urls := cfg.EffectiveURLs()
+	if len(urls) != 1 || urls[0] != "https://env:9200" {
+		t.Errorf("EffectiveURLs = %v, want the env override alone", urls)
+	}
+}
+
+// TestLoadConfig_EnvURLsWinOverEnvURL pins the precedence when both variables
+// are set: the list is the more specific intent.
+func TestLoadConfig_EnvURLsWinOverEnvURL(t *testing.T) {
+	dir := t.TempDir()
+	restore := chdir(t, dir)
+	defer restore()
+	t.Setenv("OPENSEARCH_URL", "https://env:9200")
+	t.Setenv("OPENSEARCH_URLS", "https://a:9200, https://b:9200")
+	cfg, err := LoadConfig()
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	urls := cfg.EffectiveURLs()
+	if len(urls) != 2 || urls[0] != "https://a:9200" || urls[1] != "https://b:9200" {
+		t.Errorf("EffectiveURLs = %v, want the env list", urls)
+	}
+}
+
 func TestLoadConfig_HistoryLimit(t *testing.T) {
 	cases := []struct {
 		name string

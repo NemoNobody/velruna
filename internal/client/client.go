@@ -256,7 +256,12 @@ func wrapWriteError(op string, err error) error {
 func (c *Client) Info(ctx context.Context) (*opensearchapi.InfoResp, error) {
 	resp, err := c.api.Info(ctx, nil)
 	if err != nil {
-		return nil, fmt.Errorf("reach OpenSearch at %s: %w", config.RedactURL(c.cfg.OpenSearchURL), err)
+		urls := c.cfg.EffectiveURLs()
+		redacted := make([]string, 0, len(urls))
+		for _, u := range urls {
+			redacted = append(redacted, config.RedactURL(u))
+		}
+		return nil, fmt.Errorf("reach OpenSearch at %s: %w", strings.Join(redacted, ", "), err)
 	}
 	return resp, nil
 }

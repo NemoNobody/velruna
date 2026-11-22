@@ -78,7 +78,15 @@ func credsTarget() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return cfg.OpenSearchURL, nil
+	return targetFromConfig(cfg), nil
+}
+
+// targetFromConfig is the endpoint whose host keys the keyring entry: the
+// first effective node, exactly what the runtime derives the password account
+// from. A list-only config leaves opensearch_url at its default, so storing
+// the secret under that default would never be found again.
+func targetFromConfig(cfg *config.Config) string {
+	return cfg.EffectiveURLs()[0]
 }
 
 func credsSetCmd() *cobra.Command {
@@ -187,7 +195,7 @@ func credsStatusCmd() *cobra.Command {
 					fatalErr(cerr)
 				}
 				cfg = c
-				target = c.OpenSearchURL
+				target = targetFromConfig(c)
 			}
 			host := accountFor(target)
 			_, kerr := keyring.Get(config.KeyringService, host)

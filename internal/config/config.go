@@ -317,6 +317,10 @@ func loadConfig(explicitPath string, finder func() string) (*Config, error) {
 	}
 	if url := os.Getenv("OPENSEARCH_URL"); url != "" {
 		cfg.OpenSearchURL = url
+		// An explicit single-node override replaces the file's list: the list
+		// wins in EffectiveURLs, so keeping it would silently ignore this
+		// variable ("environment always overrides the file").
+		cfg.OpenSearchURLs = nil
 	}
 	if urls := os.Getenv("OPENSEARCH_URLS"); urls != "" {
 		cfg.OpenSearchURLs = splitURLList(urls)
