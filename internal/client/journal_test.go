@@ -638,6 +638,33 @@ func TestUUIDAppendCollisionIsNotSuccess(t *testing.T) {
 	}
 }
 
+// A value-change add over an OBSOLETE fact resurrects; if its journal
+// append lags, the typed answer is discarded at the MCP error edge, so
+// the error text itself must name the resurrection.
+func TestCorrectionOverObsoleteLagNamesResurrection(t *testing.T) {
+	c, _ := newFakeClient(t, func(r recordedRequest) (int, string) {
+		if code, body := journalInfraOK(r); code != http.StatusInternalServerError {
+			return code, body
+		}
+		switch {
+		case r.Method == http.MethodGet && r.Path == "/velruna/_doc/k":
+			return http.StatusOK, `{"_index":"velruna","_id":"k","_version":1,"_seq_no":1,"_primary_term":1,"found":true,"_source":{"key":"k","value":"old","category":"config","project":"p","status":"obsolete"}}`
+		case r.Method == http.MethodPost && r.Path == "/velruna/_update/k":
+			return http.StatusOK, `{"_index":"velruna","_id":"k","result":"updated"}`
+		case r.Method == http.MethodPut && strings.HasPrefix(r.Path, "/velruna-history-"):
+			return http.StatusConflict, `{"error":"version conflict, document already exists","status":409}`
+		}
+		return http.StatusInternalServerError, `{"status":500,"error":"unexpected ` + r.Method + " " + r.Path + `"}`
+	})
+	res, err := c.Add(context.Background(), model.NewFact("k", "new", "config", "p", "s", ""))
+	if err == nil || !strings.Contains(err.Error(), "resurrecting an obsolete fact") || !strings.Contains(err.Error(), "journal entry lagged") {
+		t.Fatalf("a lagged correction over an obsolete fact must name the resurrection, got: %v", err)
+	}
+	if !res.Changed || !res.Resurrected {
+		t.Errorf("res = %+v, want Changed=true Resurrected=true", res)
+	}
+}
+
 // TestResurrectAppendCollisionIsNotSuccess pins the resurrect site's
 // idempotent=false flag and its error wording: the fresh uuid ref of a
 // resurrection cannot pre-exist, so the 409 must surface as a lagged
