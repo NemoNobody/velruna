@@ -31,7 +31,7 @@ document keyed by its `key` (the key is the document ID).
 | `updated_by` | keyword | self-reported label of the last writer (moves on every write) |
 | `confirmed_by` | object (`enabled: false`) | who re-verified the fact (the confirmed-by set) — stored, never indexed |
 | `current_ref` | keyword | id of the journal entry that carries the current value |
-| `superseded_by` | keyword | key of the fact that replaces this one (a succession link); absent while the fact is current |
+| `superseded_by` | keyword | key of the fact that replaces this one (a succession link); absent until `velruna_patch` sets it, and it persists once set (a later patch may repoint it) |
 | `history` | object (`enabled: false`) | **legacy** pre-journal array `[{value, observed_at, source}]` — stored, never indexed; `velruna migrate-history` moves it into the journal and removes the field |
 
 The catalog is applied twice: on index creation, and additively on an existing
@@ -249,8 +249,11 @@ the fact doc:
   automatically on the first accepted write.
 - Write order is **doc-first**: the journal entry id is preallocated into
   `current_ref`, the fact doc is updated, then the entry is indexed. A lost
-  entry append leaves `current_ref` dangling (repairable: `migrate-history`
-  re-appends the current state under the same deterministic id); the reverse
+  entry append leaves `current_ref` dangling — `migrate-history` re-appends
+  the current state only for facts that never got a link (the creation
+  path); scripted writes preallocate a random uuid, so a lost scripted
+  append keeps its dangling ref until the next correction journals the
+  value; the reverse
   order could journal a value that never reached the doc.
   Value corrections are last-writer-wins, not CAS: two concurrent
   corrections both land in the journal and the doc keeps the later one, so
@@ -271,8 +274,10 @@ velruna migrate-history [--project <p>] [--yes]
 
 One-time upgrade step from pre-journal releases: moves each fact's in-doc
 `history` array into the journal (entries land in the index of their
-`observed_at`), appends the current value, sets `current_ref`, and removes
-the array. It prints the plan first; `--yes` writes. Unmigrated facts keep
+`observed_at`), appends the current value and sets `current_ref` — only
+while the fact is still unlinked (a fact a post-upgrade edit already
+linked gets just the array entries) — and removes the array. It prints
+the plan first; `--yes` writes. Unmigrated facts keep
 working; their history just stays in-doc until the next correction.
 Reruns after a partial failure are safe: entries are appended under ids
 derived from their content, so the rerun collides with what the previous
@@ -319,7 +324,8 @@ Rules:
   the source. Categories without a TTL stay `stale: false`.
 - `stale: true` is an instruction to re-verify, not a verdict to discard. The
   store provides the signal; the agent judges.
-- Nothing in `add`/`obsolete` moves `observed_at` except a real value change, so
+- Nothing in `add`/`obsolete` moves `observed_at` except a real value change
+  or a resurrection (obsolete → verified re-dates the observation), so
   a stale fact cannot be silently "re-freshed" by a notes touch.
 
 ## Keywords
@@ -390,24 +396,24 @@ trap 'rm -f "$tmp"' EXIT       # the conf can carry a plaintext password: it
 jq '.index_name = "velruna_new"' velruna.conf >"$tmp"
 VELRUNA_CONF="$tmp" velruna status | grep 'index:'   # must show velruna_new
 VELRUNA_CONF="$tmp" velruna add reindex:seed "placeholder" context_map -p velruna
-                               # (run step 1 in one shell session: $tmp lives
-                               # only as long as that session)
 
 # 2. Copy the documents. From here until the swap is done the store must
 #    stay quiet for writes: _reindex reads a point-in-time snapshot of the
 #    source, so a fact updated mid-copy is copied as it was when the copy
 #    started — neither the count check below nor the response fields
 #    notice it. "conflicts": "proceed" matters only for destination-side
-#    version conflicts (external versioning in the target, or a writer
-#    racing into it); with the default internal versioning a same-_id
-#    document in the target is silently overwritten and counted as
-#    "updated", never as a conflict. The response is a sanity check,
+#    version conflicts (external versioning in the target; velruna's own
+#    writes use internal versioning, so a racing writer lands as
+#    "updated", never as a conflict). The response is a sanity check,
 #    never a substitute for a quiet store.
 curl -u "$OS_USER" -H 'Content-Type: application/json' -X POST \
   http://localhost:9200/_reindex \
   -d '{"conflicts":"proceed","source":{"index":"velruna"},"dest":{"index":"velruna_new"}}'
 #    The response must report "version_conflicts": 0 and an empty
-#    "failures". If step 2 has to be redone, DELETE velruna_new first (and
+#    "failures" — with this request the tally is always 0 (internal
+#    versioning cannot conflict), so that half of the check only catches
+#    a hand-modified request; "failures" is the part that can actually
+#    fire. If step 2 has to be redone, DELETE velruna_new first (and
 #    clean its stray journal names as in step 5), THEN re-run step 1 to
 #    re-create and re-seed the target: repeating step 2 alone would make
 #    _reindex auto-create a missing target with a dynamic mapping — the
@@ -513,9 +519,10 @@ The field is a chain, not a graph, and the invariants make it walkable:
   its journal entry carries `marker=superseded-newer-with-older`, so a
   reversed claim is a query, not a surprise.
 
-The link is not part of the value: a value correction keeps it and touches
-neither `observed_at` nor `confirmed_by` — succession states a relation
-between records, not a re-observation of one.
+The link is not part of the value: a value correction keeps the link (and
+still re-dates `observed_at` and resets `confirmed_by` like any value
+change), while a link-only patch touches neither — succession states a
+relation between records, not a re-observation of one.
 
 A link's target is protected at the write: retiring a fact that other
 **verified** facts point at (`velruna_obsolete`, or a `velruna_patch` status
@@ -726,8 +733,12 @@ come from a config file:
 - `velruna.conf` next to the binary
 - `~/.velruna.conf`
 
+(The flag and `VELRUNA_CONF` pick WHICH file is read — they are not value
+overrides. `velruna mcp` skips the current-dir entry: its cwd belongs to
+the agent that spawned it, not to the operator.)
+
 Env vars override the file: `OPENSEARCH_URL`, `OPENSEARCH_URLS`, `OPENSEARCH_USER`,
-`OPENSEARCH_PASSWORD`, `OPENSEARCH_INSECURE_SKIP_VERIFY`, `VELRUNA_CONF`,
+`OPENSEARCH_PASSWORD`, `OPENSEARCH_INSECURE_SKIP_VERIFY`,
 `VELRUNA_INDEX`, `VELRUNA_HISTORY_PERIOD`, `VELRUNA_HISTORY_LIMIT`,
 `VELRUNA_SECRET_GUARD`,
 `VELRUNA_ALLOW_PLAINTEXT`, `VELRUNA_SUMMARY_MIN_LEN`,
