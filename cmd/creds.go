@@ -127,7 +127,11 @@ password going missing. --name records an explicit label instead. When nothing
 answers at the configured endpoint, the entry falls back to the legacy
 host[:port] account and the output says so. When the store answers but rejects
 the password (HTTP 401), nothing is stored: a credential the store itself
-refuses cannot work in the runtime either.`,
+refuses cannot work in the runtime either.
+
+--url bypasses the config entirely (including opensearch_user): the probe then
+authenticates as OPENSEARCH_USER or the default user, and the 401 message names
+that user.`,
 		Args: cobra.NoArgs,
 		Run: func(cmd *cobra.Command, args []string) {
 			out, errOut := cmd.OutOrStdout(), cmd.ErrOrStderr()

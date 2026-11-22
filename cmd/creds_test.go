@@ -515,11 +515,17 @@ func TestProbeRejectedPassword(t *testing.T) {
 func TestProbeClusterUUIDAuthenticatesOnURLOverride(t *testing.T) {
 	t.Setenv("OPENSEARCH_USER", "")
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if _, _, ok := r.BasicAuth(); !ok {
+		u, _, ok := r.BasicAuth()
+		if !ok {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusUnauthorized)
 			_, _ = w.Write([]byte(`{"error":{"type":"security_exception","reason":"no credentials"},"status":401}`))
 			return
+		}
+		// Pin WHO the fallback authenticates as: the 401 message names this
+		// user, so a silent change of the default would make it a lie.
+		if u != config.DefaultConfig().OpenSearchUser {
+			t.Errorf("probe authenticated as %q, want the default user %q", u, config.DefaultConfig().OpenSearchUser)
 		}
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"cluster_name":"x","cluster_uuid":"uuid-ok"}`))
