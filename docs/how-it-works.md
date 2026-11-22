@@ -44,9 +44,9 @@ tag filter would silently stop matching tags the analyzer splits.
 
 - `key` is the document ID. Re-adding the same key is an idempotent upsert:
   a new value points the fact at a fresh journal entry (`current_ref`,
-  doc-first); the same value updates notes/source only — except an
-  obsolete fact, whose re-add is a resurrection: the event is journaled
-  and `observed_at` moves.
+  doc-first); the same value updates notes/source (plus `category`, and
+  `ttl_days`/`keywords` when given) — except an obsolete fact, whose
+  re-add is a resurrection: the event is journaled and `observed_at` moves.
 - `key` should be stable, unique per fact, and written in **predictable English**
   (`project:area:location:detail`) — a later session must be able to guess it
   without searching.
@@ -113,17 +113,17 @@ velruna add <key> <value> <category> [--project <p>] [--source <s>] [--notes <n>
 
 Adds a fact. If the key exists: a different value corrects it (the doc is
 updated to point at a preallocated journal-entry id, then the entry is
-appended under it); the same value updates `notes`/`source` only (no journal
-entry, `observed_at` stays) — except an obsolete fact, whose re-add
-resurrects it: journaled, and `observed_at` moves. A correction's journal entry carries the merged accepted
-state — the new value with the stored `source`/`notes` when the request left
-them empty — so the log and the doc never disagree about the qualifiers. The
-entry also repeats the doc's write-once `project` (a correction cannot move
-it) and the canonicalized `category` the write edge applied. The exception: a same-value `add` on an **obsolete**
-fact is a fresh verification — it resurrects the fact to `verified`, moves
-`observed_at` to now, and the transition is journaled (the Patch resurrect
-rule kept symmetric, so "when was it last seen alive" is always answerable
-from the log). `--notes` carries qualifiers ("checked the dev config
+appended under it); the same value updates `notes`/`source` (plus
+`category`, and `ttl_days`/`keywords` when given) with no journal entry
+and `observed_at` staying put. Either write over an **obsolete** fact
+resurrects it: the status goes back to `verified`, `observed_at` moves to
+now, and the transition is journaled (the Patch resurrect rule kept
+symmetric, so "when was it last seen alive" is always answerable from the
+log). A correction's journal entry carries the merged accepted state —
+the new value with the stored `source`/`notes` when the request left them
+empty — so the log and the doc never disagree about the qualifiers. The
+entry also repeats the doc's write-once `project` (a correction cannot
+move it) and the canonicalized `category` the write edge applied. `--notes` carries qualifiers ("checked the dev config
 only") to later sessions. An empty `--source` or `--notes` means "not given",
 never "erase": neither overwrites a stored value (the Patch contract) — on
 the touch path the qualifiers are not kept in history, so such a wipe would be
@@ -228,7 +228,8 @@ History is an append-only **journal** of dated indices, not an array inside
 the fact doc:
 
 - One entry per accepted value: `fact_key`, `op` (`write`; `rediscovery` — a
-  re-confirmation of the same value; `retire` marks the verified→obsolete
+  re-confirmation of the same value through `velruna_patch`'s `reverify`;
+  `retire` marks the verified→obsolete
   transition, so "when and by whom was this retired" is a query; `supersede`
   records a successor link — a relation, not a value), `value`,
   `notes`, `source`, `keywords`, `created_at`, author fields. `op_type=create`: appends
@@ -254,7 +255,7 @@ the fact doc:
   `current_ref`, the fact doc is updated, then the entry is indexed. A lost
   entry append leaves `current_ref` dangling — `migrate-history` re-appends
   the current state only for facts that never got a link (legacy facts and
-  birth-path writes whose append failed); scripted writes preallocate a
+  birth-path writes whose append or link failed); scripted writes preallocate a
   random uuid, so *their* lost append keeps a dangling ref until the next
   journaled write (correction, status transition, reverify or link)
   repoints it. The reverse order could journal a value that never reached

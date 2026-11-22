@@ -261,7 +261,7 @@ the 2 MB `fetch_max_bytes` limit is refused with an error, not trimmed.
 
 | Command | Description |
 |---------|-------------|
-| `velruna add <key> <value> <category> [--project <p>] [--source <s>] [--notes <n>] [--summary <s>] [--allow-secret]` | Add or correct a fact (prints `added`/`updated`/`touched (same value)`; the accepted value is appended to the journal; values over `summary_min_len` require `--summary`) |
+| `velruna add <key> <value> <category> [--project <p>] [--source <s>] [--notes <n>] [--summary <s>] [--allow-secret]` | Add or correct a fact (prints `added`/`updated`/`touched (same value)`; doc-first: the fact points at a preallocated journal entry that is then appended; values over `summary_min_len` require `--summary`) |
 | `velruna get <key> [--history]` | Get a fact by key (history is off by default; `--history` prints the legacy in-doc chain, or the newest journal entries for journal-era facts — the full journal is one `velruna journal` away) |
 | `velruna search <query> [--project <p>] [--category <c>] [--status <s>] [--limit N]` | Full-text search over values, notes and summaries (`--status any` disables the status filter; `--limit 0` = up to 1000, larger values are clamped to it) |
 | `velruna keys [prefix] [--match <s>] [--project <p>] [--status <s>]` | Find facts by key: prefix and/or substring (`*`, `?` wildcards in `--match`), across projects |
@@ -284,8 +284,10 @@ unreachable store without parsing stderr.
 
 Key convention: the key names a **stable subject**, not its current value —
 `demo:api:port`, not `demo:api:v1`. Re-using the same key with a new value is a
-correction: the new value is journaled and the fact points at it; re-adding the
-same value updates notes only and leaves the journal untouched.
+correction: the fact points at a fresh journal entry (doc-first) and the entry
+is appended under it; re-adding the same value updates notes/source (plus
+`category`, and `ttl_days`/`keywords` when given) — except an obsolete fact,
+whose re-add resurrects it (journaled, `observed_at` moves).
 
 ## MCP server
 
