@@ -38,7 +38,9 @@ stage=$(mktemp -d)
 trap 'rm -rf "$stage"' EXIT
 mkdir -p "$stage/server"
 
-# The manifest version is plain semver; the tag keeps the "v".
+# The manifest version is plain semver; the tag keeps the "v" and both the
+# Makefile and the release workflow pass it through, so strip it here.
+version=${version#v}
 sed "s/__VERSION__/${version}/" "$here/packaging/mcpb/manifest.json" >"$stage/manifest.json"
 if [ "$platform" != "windows" ]; then
 	install -m 0755 "$here/packaging/mcpb/velruna-launch.sh" "$stage/server/velruna-launch.sh"
@@ -81,8 +83,11 @@ manifest.setdefault("compatibility", {})["platforms"] = [spec_platform]
 config = manifest.get("server", {}).setdefault("mcp_config", {})
 if spec_platform == "win32":
     # There is no POSIX shell on Windows: point the bundle straight at the exe.
+    # entry_point names the launched file too — the manifest is a contract, and
+    # a missing file there reads like a packaging bug.
     config["command"] = "${__dirname}/server/velruna-windows-amd64.exe"
     config.pop("platform_overrides", None)
+    manifest["server"]["entry_point"] = "server/velruna-windows-amd64.exe"
 else:
     # Drop launch overrides for OSes this bundle no longer carries: a command
     # pointing at an absent file reads like a packaging bug.
