@@ -12,11 +12,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/NemoNobody/velruna/internal/client"
 	"github.com/NemoNobody/velruna/internal/config"
 	"github.com/NemoNobody/velruna/internal/keyring"
 
 	"github.com/opensearch-project/opensearch-go/v4"
+	"github.com/opensearch-project/opensearch-go/v4/opensearchapi"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 )
@@ -203,69 +203,72 @@ refuses cannot work in the runtime either.`,
 	return set
 }
 
-// probeRejectedPassword reports whether a probe failure means the store
-// ANSWERED and refused the credential itself (HTTP 401). Silence, timeouts
-// and permission refusals (403: a valid user without cluster-info rights —
-// the password may be perfectly fine) are not rejections.
+// errPasswordRejected marks a probe failure where the store ANSWERED and
+// refused the credential itself (HTTP 401). Silence, timeouts and permission
+// refusals (403: a valid user without cluster-info rights — the password may
+// be perfectly fine) are not rejections.
+var errPasswordRejected = errors.New("password rejected")
+
 func probeRejectedPassword(err error) bool {
-	var se *opensearch.StructError
-	if errors.As(err, &se) && se.Status == http.StatusUnauthorized {
-		return true
-	}
-	var ste *opensearch.StringError
-	if errors.As(err, &ste) && ste.Status == http.StatusUnauthorized {
-		return true
-	}
-	var me *opensearch.MessageError
-	if errors.As(err, &me) && me.Status == "401" {
-		return true
-	}
-	var re *opensearch.ReasonError
-	if errors.As(err, &re) && re.Status == "401" {
-		return true
-	}
-	return false
+	return errors.Is(err, errPasswordRejected)
 }
 
 // probeClusterUUID asks the store who it is, authenticating with the password
 // being stored: the cluster name keys the new entry, so the answer has to come
 // from a request that can already succeed with that credential.
 func probeClusterUUID(target string, base *config.Config, pw string) (string, error) {
-	pc := config.DefaultConfig()
+	user, insecure := "", false
+	addresses := []string{target}
 	if base != nil {
-		pc.OpenSearchUser = base.OpenSearchUser
-		pc.InsecureSkipVerify = base.InsecureSkipVerify
+		user, insecure = base.OpenSearchUser, base.InsecureSkipVerify
 		// The store may be alive behind a node that is not the first in the
 		// list: hand the probe every configured node so the client can fail
 		// over instead of declaring a reachable store silent.
-		pc.OpenSearchURLs = base.EffectiveURLs()
+		addresses = base.EffectiveURLs()
 	}
-	if pc.OpenSearchUser == "" {
-		pc.OpenSearchUser = os.Getenv("OPENSEARCH_USER")
+	if user == "" {
+		user = os.Getenv("OPENSEARCH_USER")
 	}
-	pc.OpenSearchURL = target
-	pc.OpenSearchPassword = pw
-	c, err := client.NewClient(pc)
-	if err != nil {
-		return "", err
-	}
-	// One deadline covers the transport's failover across every node: a
-	// black-holed node (a firewall that never answers) must not burn the
-	// whole budget before a live node is tried, so the budget scales with
-	// the node list.
-	budget := 15 * time.Second
-	if n := len(pc.OpenSearchURLs); n > 1 {
-		if scaled := time.Duration(n) * 10 * time.Second; scaled > budget {
-			budget = scaled
-		}
+	// One deadline covers all attempts; both it and the per-attempt timeout
+	// scale with the node list so a slow node — even one that never answers
+	// — cannot eat the probe before a live node gets its turn. The probe
+	// client is read-only (Info only), so unlike the runtime client a
+	// timed-out attempt is safe to retry on the next node.
+	budget, attempt := 15*time.Second, 15*time.Second
+	if n := len(addresses); n > 1 {
+		budget = time.Duration(n) * 10 * time.Second
 		if budget > 90*time.Second {
 			budget = 90 * time.Second
 		}
+		if attempt = budget / time.Duration(n); attempt < 5*time.Second {
+			attempt = 5 * time.Second
+		}
+	}
+	api, err := opensearchapi.NewClient(opensearchapi.Config{
+		Client: opensearch.Config{
+			Addresses:            addresses,
+			Username:             user,
+			Password:             pw,
+			InsecureSkipVerify:   insecure,
+			MaxRetries:           len(addresses) - 1,
+			EnableRetryOnTimeout: true,
+			RequestTimeout:       attempt,
+		},
+	})
+	if err != nil {
+		return "", fmt.Errorf("create probe client: %w", err)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), budget)
 	defer cancel()
-	info, err := c.Info(ctx)
+	info, err := api.Info(ctx, nil)
 	if err != nil {
+		// The HTTP answer — not the body shape — is the proof: a store
+		// behind a proxy that returns 401 with an HTML page says the same
+		// thing as one that returns the OpenSearch error JSON.
+		if info != nil && info.Inspect().Response != nil &&
+			info.Inspect().Response.StatusCode == http.StatusUnauthorized {
+			return "", fmt.Errorf("%w: %w", errPasswordRejected, err)
+		}
 		return "", err
 	}
 	if info == nil || strings.TrimSpace(info.ClusterUUID) == "" {

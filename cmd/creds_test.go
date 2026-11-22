@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/NemoNobody/velruna/internal/config"
 	"github.com/NemoNobody/velruna/internal/keyring"
@@ -346,6 +347,40 @@ func TestProbeClusterUUIDFailsOverAcrossNodes(t *testing.T) {
 	}
 }
 
+// A node that accepts the connection and then never answers must not make
+// the whole store look silent: the probe's attempts are per-node and timed
+// out attempts are safe to retry (Info is read-only), so a later live node
+// still gets its turn inside the scaled budget.
+func TestProbeClusterUUIDFailsOverPastSilentNode(t *testing.T) {
+	silent := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case <-r.Context().Done():
+		case <-time.After(30 * time.Second):
+			_, _ = w.Write([]byte(`{"cluster_uuid":"never"}`))
+		}
+	}))
+	defer silent.Close()
+	live := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"cluster_name":"x","cluster_uuid":"uuid-live"}`))
+	}))
+	defer live.Close()
+
+	base := config.DefaultConfig()
+	base.OpenSearchURLs = []string{silent.URL, live.URL}
+	start := time.Now()
+	uuid, err := probeClusterUUID(base.EffectiveURLs()[0], base, "pw")
+	if err != nil {
+		t.Fatalf("the probe must retry past the silent node: %v", err)
+	}
+	if uuid != "uuid-live" {
+		t.Errorf("probed uuid = %q", uuid)
+	}
+	if elapsed := time.Since(start); elapsed > 18*time.Second {
+		t.Errorf("the probe waited %v, want the bounded per-attempt timeout (~10s)", elapsed)
+	}
+}
+
 // Entries created for a store the current config no longer points at are only
 // reachable through an explicit label; rm must not touch the configured store's
 // legacy entry while cleaning up an orphan by --name.
@@ -413,6 +448,15 @@ func TestProbeRejectedPassword(t *testing.T) {
 		_, _ = w.Write([]byte(`{"error":{"type":"security_exception","reason":"unable to authenticate user"},"status":401}`))
 	}))
 	defer auth.Close()
+	html401 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// A store behind a proxy that answers 401 with an HTML page says the
+		// same thing as the OpenSearch error JSON: the HTTP answer, not the
+		// body shape, is the proof the credential was refused.
+		w.Header().Set("Content-Type", "text/html")
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = w.Write([]byte("<html><body>401 Unauthorized</body></html>"))
+	}))
+	defer html401.Close()
 	forbidden := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusForbidden)
@@ -424,6 +468,12 @@ func TestProbeRejectedPassword(t *testing.T) {
 		t.Fatal("a 401 answer must fail the probe")
 	} else if !probeRejectedPassword(err) {
 		t.Errorf("a 401 must read as a rejected password: %v", err)
+	}
+
+	if _, err := probeClusterUUID(html401.URL, nil, "bad pw"); err == nil {
+		t.Fatal("a 401 answer with a non-OpenSearch body must fail the probe")
+	} else if !probeRejectedPassword(err) {
+		t.Errorf("a 401 with an HTML body must read as a rejected password: %v", err)
 	}
 
 	if _, err := probeClusterUUID(forbidden.URL, nil, "pw"); err == nil {
