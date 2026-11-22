@@ -280,7 +280,7 @@ func LoadConfig() (*Config, error) {
 //  3. velruna.conf next to the executable
 //  4. ~/.velruna.conf
 //
-// Env vars override the file: OPENSEARCH_URL, OPENSEARCH_USER,
+// Env vars override the file: OPENSEARCH_URL, OPENSEARCH_URLS, OPENSEARCH_USER,
 // OPENSEARCH_PASSWORD, OPENSEARCH_INSECURE_SKIP_VERIFY, VELRUNA_INDEX,
 // VELRUNA_HISTORY_LIMIT, VELRUNA_HISTORY_PERIOD, VELRUNA_SUMMARY_MIN_LEN,
 // VELRUNA_SUMMARY_MAX_LEN, VELRUNA_SECRET_GUARD, VELRUNA_ALLOW_PLAINTEXT,
@@ -323,7 +323,14 @@ func loadConfig(explicitPath string, finder func() string) (*Config, error) {
 		cfg.OpenSearchURLs = nil
 	}
 	if urls := os.Getenv("OPENSEARCH_URLS"); urls != "" {
-		cfg.OpenSearchURLs = splitURLList(urls)
+		list := splitURLList(urls)
+		if len(list) == 0 {
+			// An empty list would silently fall back to the file's opensearch_url
+			// (or the default localhost): refuse instead of writing to a store the
+			// caller did not name (same rule as the fetch allowlist).
+			return nil, fmt.Errorf("OPENSEARCH_URLS has no entries: list node addresses or unset it")
+		}
+		cfg.OpenSearchURLs = list
 	}
 	if user := os.Getenv("OPENSEARCH_USER"); user != "" {
 		cfg.OpenSearchUser = user
