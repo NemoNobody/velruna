@@ -154,7 +154,10 @@ func runMCPServer(confPath string) error {
 			"velruna_add: value changes and status transitions append entries, " +
 			"notes/summary/source moves are touches. On a value change the old " +
 			"summary is CLEARED unless you pass a new one (a stale table of " +
-			"contents is a lie).",
+			"contents is a lie). superseded_by sets the successor link: the fact " +
+			"key that replaces this one, which a reader should trust instead " +
+			"(one link per fact, never repointed; the target must exist and be " +
+			"verified; cycles refused). The link is journaled as op=supersede.",
 	}, s.patch)
 
 	mcp.AddTool(srv, &mcp.Tool{
@@ -220,7 +223,8 @@ func runMCPServer(confPath string) error {
 			"accepted values (newest first, bounded by limit; changes = writes-1). " +
 			"op=write is an accepted value; op=rediscovery is a re-confirmation of " +
 			"the same value (velruna_patch reverify); op=retire marks a " +
-			"verified→obsolete transition. Counts after an " +
+			"verified→obsolete transition; op=supersede records a superseded_by " +
+			"link (a relation between records, not a value change). Counts after an " +
 			"admin deleted old journal indices are lower bounds. Use " +
 			"velruna_history_info first for the cheap overview, the full " +
 			"journal only when the history matters.",
@@ -347,6 +351,7 @@ type factView struct {
 	Status       string            `json:"status" jsonschema:"verified | obsolete"`
 	Source       string            `json:"source" jsonschema:"where it came from, e.g. tool:read_file, doc:README, user:confirmed"`
 	Summary      string            `json:"summary,omitempty" jsonschema:"short table-of-contents rendering of the value; required for values over summary_min_len"`
+	SupersededBy string            `json:"superseded_by,omitempty" jsonschema:"key of the fact that replaces this one: the successor a reader should trust instead (one link per fact, set by velruna_patch; the target is verified and the chain is cycle-free)"`
 	Author       string            `json:"author,omitempty" jsonschema:"who recorded the fact (self-reported label, not authentication); the author_source field names the chain that produced it"`
 	AuthorSource string            `json:"author_source,omitempty" jsonschema:"security | config | os | none — which chain link named the author"`
 	UpdatedBy    string            `json:"updated_by,omitempty" jsonschema:"self-reported label of the last writer; the birth author fields are write-once"`
@@ -406,6 +411,7 @@ func newFactView(f model.Fact, includeHistory, compact bool) factView {
 		Status:       f.Status,
 		Source:       f.Source,
 		Summary:      f.Summary,
+		SupersededBy: f.SupersededBy,
 		Author:       f.Author,
 		AuthorSource: f.AuthorSource,
 		UpdatedBy:    f.UpdatedBy,
@@ -977,17 +983,18 @@ func (s *mcpServer) addBatch(ctx context.Context, req *mcp.CallToolRequest, in a
 }
 
 type patchInput struct {
-	Key         string   `json:"key" jsonschema:"exact fact key of an EXISTING fact (patch never creates: use velruna_add)"`
-	Value       string   `json:"value,omitempty" jsonschema:"new value: journaled, observed_at moves; the summary resets with it (pass a new summary for a long value)"`
-	Summary     string   `json:"summary,omitempty" jsonschema:"new table of contents (with a value change: omitting it CLEARS the old summary — an old summary for a new value is a lie)"`
-	Notes       string   `json:"notes,omitempty" jsonschema:"replaces notes (non-empty = provided, add's convention)"`
-	NotesAppend string   `json:"notes_append,omitempty" jsonschema:"append a dated line 'YYYY-MM-DD: text' to notes (atomic server-side; the cheap qualifier update — no need to resend the value)"`
-	Source      string   `json:"source,omitempty" jsonschema:"replaces source when non-empty"`
-	Status      string   `json:"status,omitempty" jsonschema:"verified | obsolete: a transition is journaled; obsolete→verified sets observed_at=now (re-declaring alive is a fresh verification)"`
-	Reason      string   `json:"reason,omitempty" jsonschema:"why it became obsolete (only with status=obsolete; folded into notes)"`
-	Reverify    bool     `json:"reverify,omitempty" jsonschema:"re-confirm the current value: observed_at moves to now, the journal gains op=rediscovery, the writer joins confirmed_by; cannot be combined with value/summary/status"`
-	TTLDays     int      `json:"ttl_days,omitempty" jsonschema:"retune the staleness window in days (bounded by the category cap: config/endpoint 14, location/behavior 30, recipe 180, rule 90; context_map uncapped); omitted = untouched; a qualifier touch, not journaled"`
-	Keywords    []string `json:"keywords,omitempty" jsonschema:"replaces the tag set when non-empty (same normalization as add: lowercase single tokens, max 10); a qualifier touch, not journaled — the tags appear in the history with the next accepted value"`
+	Key          string   `json:"key" jsonschema:"exact fact key of an EXISTING fact (patch never creates: use velruna_add)"`
+	Value        string   `json:"value,omitempty" jsonschema:"new value: journaled, observed_at moves; the summary resets with it (pass a new summary for a long value)"`
+	Summary      string   `json:"summary,omitempty" jsonschema:"new table of contents (with a value change: omitting it CLEARS the old summary — an old summary for a new value is a lie)"`
+	Notes        string   `json:"notes,omitempty" jsonschema:"replaces notes (non-empty = provided, add's convention)"`
+	NotesAppend  string   `json:"notes_append,omitempty" jsonschema:"append a dated line 'YYYY-MM-DD: text' to notes (atomic server-side; the cheap qualifier update — no need to resend the value)"`
+	Source       string   `json:"source,omitempty" jsonschema:"replaces source when non-empty"`
+	Status       string   `json:"status,omitempty" jsonschema:"verified | obsolete: a transition is journaled; obsolete→verified sets observed_at=now (re-declaring alive is a fresh verification)"`
+	Reason       string   `json:"reason,omitempty" jsonschema:"why it became obsolete (only with status=obsolete; folded into notes)"`
+	Reverify     bool     `json:"reverify,omitempty" jsonschema:"re-confirm the current value: observed_at moves to now, the journal gains op=rediscovery, the writer joins confirmed_by; cannot be combined with value/summary/status"`
+	TTLDays      int      `json:"ttl_days,omitempty" jsonschema:"retune the staleness window in days (bounded by the category cap: config/endpoint 14, location/behavior 30, recipe 180, rule 90; context_map uncapped); omitted = untouched; a qualifier touch, not journaled"`
+	Keywords     []string `json:"keywords,omitempty" jsonschema:"replaces the tag set when non-empty (same normalization as add: lowercase single tokens, max 10); a qualifier touch, not journaled — the tags appear in the history with the next accepted value"`
+	SupersededBy string   `json:"superseded_by,omitempty" jsonschema:"key of the fact that replaces this one (the successor to trust instead): set once, never repointed; the target must exist and be verified and the chain must stay cycle-free; journaled as op=supersede"`
 
 	// ConfirmSecret bypasses a guard hit at secret_guard=ask (see addInput).
 	ConfirmSecret bool `json:"confirm_secret,omitempty" jsonschema:"confirm a guard hit is a false positive (secret_guard=ask only); set only after the user approved the exact finding"`
@@ -1027,16 +1034,17 @@ func (s *mcpServer) patch(ctx context.Context, req *mcp.CallToolRequest, in patc
 // shared by the single and batch paths).
 func patchFields(in patchInput) client.PatchFields {
 	return client.PatchFields{
-		Value:       in.Value,
-		Summary:     in.Summary,
-		Notes:       in.Notes,
-		NotesAppend: in.NotesAppend,
-		Source:      in.Source,
-		Status:      in.Status,
-		Reason:      in.Reason,
-		TTLDays:     in.TTLDays,
-		Keywords:    in.Keywords,
-		Reverify:    in.Reverify,
+		Value:        in.Value,
+		Summary:      in.Summary,
+		Notes:        in.Notes,
+		NotesAppend:  in.NotesAppend,
+		Source:       in.Source,
+		Status:       in.Status,
+		Reason:       in.Reason,
+		TTLDays:      in.TTLDays,
+		Keywords:     in.Keywords,
+		Reverify:     in.Reverify,
+		SupersededBy: in.SupersededBy,
 	}
 }
 
@@ -1068,6 +1076,7 @@ func (s *mcpServer) patchOne(ctx context.Context, cfg *config.Config, c *client.
 		textField("notes_append", &in.NotesAppend),
 		identityField("source", &in.Source),
 		identityField("keywords", &kwForGuard),
+		identityField("superseded_by", &in.SupersededBy),
 		textField("reason", &in.Reason))
 	if gErr != nil {
 		return patchOutput{}, gErr

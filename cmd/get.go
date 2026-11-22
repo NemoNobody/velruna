@@ -119,6 +119,13 @@ func printFact(w io.Writer, f *model.Fact, now time.Time, history bool, entries 
 		b.WriteString(strings.Join(f.Keywords, ", "))
 		b.WriteString("\n")
 	}
+	if f.SupersededBy != "" {
+		// The successor is navigation, not prose: a reader who trusts this
+		// fact must be sent to the record that replaced it.
+		b.WriteString("superseded_by: ")
+		b.WriteString(strconv.Quote(f.SupersededBy))
+		b.WriteString("\n")
+	}
 	if len(f.Redactions) > 0 {
 		// The stored value is shorter than the one that was written: a reader
 		// must not take it for the complete claim (see the guard's write path).

@@ -72,6 +72,17 @@ type Fact struct {
 	// the journal (and before the migrate-history run) have it empty.
 	CurrentRef string `json:"current_ref,omitempty" yaml:"current_ref,omitempty"`
 
+	// SupersededBy names the fact that replaces this one: the successor a
+	// reader should trust instead. One link per fact (records form a chain,
+	// not a graph): set by velruna_patch, never repointed, the target must be
+	// a verified fact, and cycles are refused. A link pointing BACK in time
+	// (a newer fact declares an older successor) is legal — a key may be
+	// merged into a record that already existed — but the journal flags it
+	// (model.MarkerNewerWithOlder), because a reversed claim deserves a second
+	// look. A value correction keeps the link: it is a relation between
+	// records, not part of the value.
+	SupersededBy string `json:"superseded_by,omitempty" yaml:"superseded_by,omitempty"`
+
 	// ConfirmedBy is who has verified that the CURRENT value is true, in order
 	// of first confirmation. It starts with the creator (adding a fact is the
 	// first verification) and grows on velruna_patch reverify. A value change

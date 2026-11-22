@@ -224,7 +224,8 @@ the fact doc:
 
 - One entry per accepted value: `fact_key`, `op` (`write`; `rediscovery` — a
   re-confirmation of the same value; `retire` marks the verified→obsolete
-  transition, so "when and by whom was this retired" is a query), `value`,
+  transition, so "when and by whom was this retired" is a query; `supersede`
+  records a successor link — a relation, not a value), `value`,
   `notes`, `source`, `keywords`, `created_at`, author fields. `op_type=create`: appends
   never overwrite each other, there is no CAS.
 - Entries live in `<index>-history-<period-date>`: the period granularity is
@@ -353,6 +354,33 @@ resurrection resets the set: those confirmations were about a different value
 deduplicated per user+host (latest time wins); every event stays in the journal.
 Who may confirm is a permissions question, and permissions live in OpenSearch
 roles — the store records, it does not gate.
+
+## Succession (`superseded_by`)
+
+Some records are replaced rather than corrected: an old key dies, and the
+truth moves to a new one. Copying the value would create two claims to keep in
+sync, so the store keeps a **link** instead — `superseded_by` names the fact a
+reader should trust instead. `velruna_patch {superseded_by: "other:key"}` sets
+it and journals an `op=supersede` entry; `velruna_get` returns the field, so a
+reader who lands on the dead key is sent to the live one.
+
+The field is a chain, not a graph, and the invariants make it walkable:
+
+- one outgoing link per fact — a link is set once and never repointed (a
+  `patch` with a different target is refused; a merge of three records is
+two links, written once each);
+- no self-reference and no cycles — the client walks the target's own chain
+  (bounded) before accepting a link;
+- every fact on the chain must be `verified`: a reader sent through an obsolete
+  hop would land on a record the store itself says is dead;
+- a link pointing back in time (a fact created later declaring an earlier
+  successor — a key merged into a record that already existed) is legal, but
+  its journal entry carries `marker=superseded-newer-with-older`, so a
+  reversed claim is a query, not a surprise.
+
+The link is not part of the value: a value correction keeps it and touches
+neither `observed_at` nor `confirmed_by` — succession states a relation
+between records, not a re-observation of one.
 
 ## Advisory contract and precedence
 

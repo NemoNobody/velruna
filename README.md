@@ -61,6 +61,11 @@ Each fact carries evidence, not verdicts:
 - **keywords**: up to 10 normalized tags per fact (lowercase single tokens),
   exact-match filterable — cross-project slices (`perf`, `security`, `infra`)
   without a graph backlog, and recipes/rules stay findable by topic;
+- **successor** (`superseded_by`): at most one link per fact to the record
+  that replaces it, set once by `velruna_patch` (journaled as `op=supersede`).
+  The target must be a verified fact and the chain must stay cycle-free; a
+  link pointing back in time is legal but flagged in the journal. It answers
+  "this key is stale garbage, read that one instead" without copying the value;
 - **secret guard**: writes scan for credential-like text (the index is
   plaintext) — a real credential refuses the write, a hit in an identity field
   (key, project, source, keywords) also refuses, while a heuristic hit (a long

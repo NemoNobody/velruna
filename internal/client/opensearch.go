@@ -329,6 +329,8 @@ func buildIndexProperties() map[string]interface{} {
 		"history": map[string]interface{}{"type": "object", "enabled": false},
 		// Journal entry id of the current value (see model.Fact.CurrentRef).
 		"current_ref": map[string]interface{}{"type": "keyword"},
+		// Successor link (see model.Fact.SupersededBy): exact-match navigation.
+		"superseded_by": map[string]interface{}{"type": "keyword"},
 		// Authorship labels (self-reported; see model.Fact): exact-match
 		// fields for "who wrote what" queries, never full-text.
 		"author":        map[string]interface{}{"type": "keyword"},
@@ -816,6 +818,7 @@ func (c *Client) newJournalEntryFor(ctx context.Context, f *model.Fact, factID s
 	e := model.NewJournalEntry(f.Key, factID, f.Project, f.Category, model.OpWrite, f.Value, f.Notes, f.Source, ts)
 	e.Keywords = f.Keywords
 	e.Redactions = f.Redactions
+	e.SupersededBy = f.SupersededBy
 	c.resolveAuthor(ctx).applyTo(e)
 	return e
 }
@@ -1170,6 +1173,10 @@ type PatchFields struct {
 	Reason      string   // why it became obsolete (folded into notes; guard-checked)
 	TTLDays     int      // retunes the staleness window (bounded by the category cap); 0 = untouched
 	Keywords    []string // replaces the tag set when non-empty (tags are journaled with each accepted value)
+	// SupersededBy sets the successor link (see model.Fact.SupersededBy): one
+	// link per fact, target verified, no cycles. The link is journaled with
+	// op=supersede; the same value on an already-linked fact is a touch.
+	SupersededBy string
 	// Reverify re-confirms the current value: observed_at moves to now, the
 	// journal gains an op=rediscovery entry, and the writer joins confirmed_by.
 	// It cannot be combined with a value or status change — those are other
@@ -1183,8 +1190,8 @@ type PatchFields struct {
 
 // PatchResult reports what the patch did.
 type PatchResult struct {
-	// Changed: a new version was accepted (value change, status transition) or
-	// a re-confirmation was journaled (Reverified).
+	// Changed: a new version was accepted (value change, status transition,
+	// supersede link) or a re-confirmation was journaled (Reverified).
 	Changed bool
 	Status  string
 	// Reverified: the value was re-confirmed in place (observed_at moved, the
@@ -1227,6 +1234,7 @@ if (params.confirmer != null) {
   if (!found) { ctx._source.confirmed_by.add(params.confirmer); }
 }
 if (params.status != null) { ctx._source.status = params.status; }
+if (params.superseded_by != null) { ctx._source.superseded_by = params.superseded_by; }
 if (params.observed_at != null) { ctx._source.observed_at = params.observed_at; }
 if (params.current_ref != null) { ctx._source.current_ref = params.current_ref; }
 ctx._source.updated_at = params.updated_at;
@@ -1240,8 +1248,9 @@ ctx._source.updated_by = params.updated_by;
 // error would drown in the "do not retry" advice).
 func ValidatePatchFields(p PatchFields) error {
 	if p.Value == "" && p.Summary == "" && p.Notes == "" && p.NotesAppend == "" &&
-		p.Source == "" && p.Status == "" && p.Reason == "" && p.TTLDays == 0 && len(p.Keywords) == 0 && !p.Reverify {
-		return fmt.Errorf("patch: nothing to change (provide value, summary, notes, notes_append, source, status, reason, ttl_days, keywords, or reverify)")
+		p.Source == "" && p.Status == "" && p.Reason == "" && p.TTLDays == 0 && len(p.Keywords) == 0 &&
+		p.SupersededBy == "" && !p.Reverify {
+		return fmt.Errorf("patch: nothing to change (provide value, summary, notes, notes_append, source, status, reason, ttl_days, keywords, superseded_by, or reverify)")
 	}
 	if p.Reverify && (p.Value != "" || p.Summary != "" || p.Status != "") {
 		return fmt.Errorf("patch: reverify cannot be combined with a value, summary or status change (a new value is verified by its writer; a status transition is its own event)")
@@ -1267,6 +1276,59 @@ func ValidatePatchFields(p PatchFields) error {
 	return nil
 }
 
+// maxSupersedeChain bounds the cycle walk behind superseded_by. A real chain
+// of renamed records is a handful of links; a hundred means a loop the walk
+// failed to recognize or a store corrupted by hand.
+const maxSupersedeChain = 100
+
+// checkSupersedeTarget validates a proposed superseded_by link and reports
+// whether it points back in time (the target was created before the linking
+// fact — allowed, but journaled with a marker).
+//
+// The invariants keep the link a chain a reader can follow to a trusted end:
+// one outgoing link per fact (a link is set once and never repointed), no
+// self-reference, no cycles, and every fact on the chain — the target and
+// whatever the target itself superseded — verified. A reader sent through an
+// obsolete hop would land on a record the store itself says is dead.
+func (c *Client) checkSupersedeTarget(ctx context.Context, fact *model.Fact, targetKey string) (reversed bool, err error) {
+	if targetKey == fact.Key {
+		return false, contractErrorf("patch: fact %q cannot be superseded by itself", fact.Key)
+	}
+	if fact.SupersededBy != "" {
+		return false, contractErrorf("patch: fact %q is already superseded by %q: a link is set once (the chain is not repointed)", fact.Key, fact.SupersededBy)
+	}
+	seen := map[string]struct{}{fact.Key: {}}
+	cur := targetKey
+	var target *model.Fact
+	for hops := 0; ; hops++ {
+		if hops >= maxSupersedeChain {
+			return false, contractErrorf("patch: superseded_by chain from %q is longer than %d facts (a loop or a hand-made chain)", targetKey, maxSupersedeChain)
+		}
+		if _, dup := seen[cur]; dup {
+			return false, contractErrorf("patch: superseded_by would create a cycle (%q is already on the chain)", cur)
+		}
+		seen[cur] = struct{}{}
+		f, gerr := c.Get(ctx, cur)
+		if errors.Is(gerr, ErrNotFound) {
+			return false, contractErrorf("patch: superseded_by target %q does not exist (a link must point at a stored fact)", cur)
+		}
+		if gerr != nil {
+			return false, fmt.Errorf("patch: superseded_by: %w", gerr)
+		}
+		if f.Status != "verified" {
+			return false, contractErrorf("patch: superseded_by target %q is %s: a reader sent there would land on an untrusted record", cur, f.Status)
+		}
+		if hops == 0 {
+			target = f
+		}
+		if f.SupersededBy == "" {
+			break
+		}
+		cur = f.SupersededBy
+	}
+	return target.CreatedAt.Before(fact.CreatedAt), nil
+}
+
 // Patch applies a partial update to an existing fact. It exists so an agent
 // can extend qualifiers (append a dated note) or flip status without
 // re-sending — and re-paying context for — the whole value. Journal
@@ -1282,6 +1344,11 @@ func ValidatePatchFields(p PatchFields) error {
 // Resurrection (obsolete → verified) sets observed_at=now: re-declaring a
 // dead fact alive IS a fresh verification, and a fact that resurrects while
 // staying stale would contradict its own staleness signal.
+//
+// SupersededBy is its own event: setting the link journals op=supersede
+// (never op=write — the value did not move, and churn counters must stay
+// truthful). Unlike notes or tags, the link does not touch observed_at: it
+// states a relation between records, not a re-observation of the fact.
 func (c *Client) Patch(ctx context.Context, key string, p PatchFields) (PatchResult, error) {
 	if err := ValidatePatchFields(p); err != nil {
 		return PatchResult{}, err
@@ -1315,6 +1382,15 @@ func (c *Client) Patch(ctx context.Context, key string, p PatchFields) (PatchRes
 	valueChanged := p.Value != "" && p.Value != existing.Value
 	statusChanged := p.Status != "" && p.Status != existing.Status
 	resurrect := statusChanged && p.Status == "verified"
+	linkChanged := p.SupersededBy != "" && p.SupersededBy != existing.SupersededBy
+	linkReversed := false
+	if linkChanged {
+		rev, lerr := c.checkSupersedeTarget(ctx, existing, p.SupersededBy)
+		if lerr != nil {
+			return PatchResult{}, lerr
+		}
+		linkReversed = rev
+	}
 
 	// notes for the doc: replace wins, then append, then the retire reason.
 	newNotes := existing.Notes
@@ -1392,7 +1468,7 @@ func (c *Client) Patch(ctx context.Context, key string, p PatchFields) (PatchRes
 		effectiveRedactions = model.MergeRedactions(existing.Redactions, replacedFields, qualifierRedactions)
 	}
 	var entry *model.JournalEntry
-	if valueChanged || statusChanged || p.Reverify {
+	if valueChanged || statusChanged || p.Reverify || linkChanged {
 		stated := *existing
 		if valueChanged {
 			stated.Value = p.Value
@@ -1408,6 +1484,10 @@ func (c *Client) Patch(ctx context.Context, key string, p PatchFields) (PatchRes
 		if len(p.Keywords) > 0 {
 			// The snapshot states the tag set the doc will hold.
 			stated.Keywords = p.Keywords
+		}
+		if linkChanged {
+			// The entry states the successor link this write establishes.
+			stated.SupersededBy = p.SupersededBy
 		}
 		if valueChanged || len(replacedFields) > 0 || len(qualifierRedactions) > 0 {
 			// The entry states the text it records, audit included.
@@ -1426,6 +1506,14 @@ func (c *Client) Patch(ctx context.Context, key string, p PatchFields) (PatchRes
 			// Same value, freshly observed: the reserved rediscovery marker is
 			// exactly this event, and the entry names who re-confirmed it.
 			entry.Op = model.OpRediscovery
+		}
+		if linkChanged && !valueChanged && !statusChanged && !p.Reverify {
+			// Nothing but the link moved: the entry states the relation, not a
+			// value observation (op=write would inflate the churn counters).
+			entry.Op = model.OpSupersede
+		}
+		if linkChanged && linkReversed {
+			entry.Marker = model.MarkerNewerWithOlder
 		}
 		currentRef = uuid.New().String()
 	}
@@ -1452,6 +1540,7 @@ func (c *Client) Patch(ctx context.Context, key string, p PatchFields) (PatchRes
 		"confirmed_by":     nil,
 		"confirmer":        nil,
 		"status":           nil,
+		"superseded_by":    nil,
 		"observed_at":      nil,
 		"current_ref":      nil,
 		"updated_at":       now.Format(time.RFC3339),
@@ -1469,7 +1558,7 @@ func (c *Client) Patch(ctx context.Context, key string, p PatchFields) (PatchRes
 		params["current_ref"] = currentRef
 		// A new value is verified only by its writer: the set resets.
 		params["confirmed_by"] = []model.Confirmer{c.resolveAuthor(ctx).confirmer(now)}
-	} else if statusChanged {
+	} else if statusChanged || linkChanged {
 		params["current_ref"] = currentRef
 	}
 	// The guard audit describes the stored text: a value change sets or clears
@@ -1523,6 +1612,9 @@ func (c *Client) Patch(ctx context.Context, key string, p PatchFields) (PatchRes
 	if p.Status != "" {
 		params["status"] = p.Status
 	}
+	if linkChanged {
+		params["superseded_by"] = p.SupersededBy
+	}
 
 	body, _ := json.Marshal(map[string]interface{}{
 		"script": map[string]interface{}{
@@ -1548,10 +1640,10 @@ func (c *Client) Patch(ctx context.Context, key string, p PatchFields) (PatchRes
 	}
 	if entry != nil {
 		if _, jErr := c.appendJournalID(ctx, entry, currentRef, "", false); jErr != nil {
-			return PatchResult{Changed: valueChanged || statusChanged || p.Reverify, Status: newStatus, Reverified: p.Reverify}, fmt.Errorf("patch: accepted, the journal entry lagged: %w", jErr)
+			return PatchResult{Changed: valueChanged || statusChanged || p.Reverify || linkChanged, Status: newStatus, Reverified: p.Reverify}, fmt.Errorf("patch: accepted, the journal entry lagged: %w", jErr)
 		}
 	}
-	return PatchResult{Changed: valueChanged || statusChanged || p.Reverify, Status: newStatus, Reverified: p.Reverify}, nil
+	return PatchResult{Changed: valueChanged || statusChanged || p.Reverify || linkChanged, Status: newStatus, Reverified: p.Reverify}, nil
 }
 
 // patchUpdateParams conditions a patch on the document version pair when it

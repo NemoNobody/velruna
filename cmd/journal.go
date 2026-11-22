@@ -29,8 +29,10 @@ func JournalCmd() *cobra.Command {
 The journal is the history: every accepted value for the key is one entry
 (op=write; op=rediscovery records a re-confirmation of the same value,
 written by velruna_patch reverify; op=retire marks a verified→obsolete
-transition). Counts after an admin deleted old
-journal indices are lower bounds — the surviving journal, not the lifetime.`,
+transition; op=supersede records a superseded_by link to the fact that
+replaced this one — a relation, not a value change). Counts after an admin
+deleted old journal indices are lower bounds — the surviving journal, not
+the lifetime.`,
 		Args: cobra.ExactArgs(1),
 		Run: func(cmd *cobra.Command, args []string) {
 			key := strings.TrimSpace(args[0])
@@ -106,6 +108,14 @@ journal indices are lower bounds — the surviving journal, not the lifetime.`,
 				// out-of-band journal writes.
 				b.WriteString(strconv.Quote(displaySafe(e.Op, false)))
 				b.WriteString("]")
+				if e.Marker != "" {
+					b.WriteString(" marker=")
+					b.WriteString(strconv.Quote(displaySafe(e.Marker, false)))
+				}
+				if e.SupersededBy != "" {
+					b.WriteString(" superseded_by=")
+					b.WriteString(strconv.Quote(displaySafe(e.SupersededBy, false)))
+				}
 				if e.Source != "" {
 					b.WriteString(" source=")
 					b.WriteString(displaySafe(e.Source, false))

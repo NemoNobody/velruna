@@ -100,6 +100,8 @@ func buildJournalTemplateBody(prefix string, replicas int) map[string]interface{
 					"value":         map[string]interface{}{"type": "text"},
 					"notes":         map[string]interface{}{"type": "text"},
 					"source":        map[string]interface{}{"type": "keyword"},
+					"superseded_by": map[string]interface{}{"type": "keyword"},
+					"marker":        map[string]interface{}{"type": "keyword"},
 					"created_at":    map[string]interface{}{"type": "date"},
 					"ingest_at":     map[string]interface{}{"type": "date"},
 					"author":        map[string]interface{}{"type": "keyword"},

@@ -10,18 +10,28 @@ import (
 // records a re-confirmation of the same value (velruna_patch reverify): the
 // fact's observed_at moves and the writer joins confirmed_by, so the event (who,
 // when) belongs in the log. op=retire marks the entry written for a
+// look. op=retire marks the entry written for a
 // verified→obsolete transition, so "when and by whom was this retired" is a
-// query, not an inference from notes text.
+// query, not an inference from notes text. op=supersede records a
+// superseded_by link: a relation between records, not a value observation,
+// so it is its own op rather than a write that would inflate value churn.
 const (
 	OpWrite       = "write"
 	OpRediscovery = "rediscovery"
 	OpRetire      = "retire"
+	OpSupersede   = "supersede"
 )
+
+// MarkerNewerWithOlder marks a supersede entry whose link points BACK in
+// time: a fact created later declared an earlier one its successor. Legal
+// (a key merged into an older record), but the audit trail names it so a
+// later reader is not surprised by a reversed chain.
+const MarkerNewerWithOlder = "superseded-newer-with-older"
 
 // ValidOp reports whether op is a known journal operation.
 func ValidOp(op string) bool {
 	switch strings.ToLower(op) {
-	case OpWrite, OpRediscovery, OpRetire:
+	case OpWrite, OpRediscovery, OpRetire, OpSupersede:
 		return true
 	}
 	return false
@@ -52,7 +62,15 @@ type JournalEntry struct {
 	// entry states the accepted value, so «this value was stored with a span
 	// replaced» is part of that state, not a side note.
 	Redactions []Redaction `json:"redactions,omitempty"`
-	CreatedAt  time.Time   `json:"created_at"`
+	// SupersededBy is the successor link as of this entry (see
+	// model.Fact.SupersededBy). A supersede entry is the event that set it;
+	// every later entry states the link it was written under.
+	SupersededBy string `json:"superseded_by,omitempty"`
+	// Marker is a machine-readable qualifier for an entry that needs one
+	// (e.g. MarkerNewerWithOlder), so such a fact is a term query and not a
+	// prose search.
+	Marker    string    `json:"marker,omitempty"`
+	CreatedAt time.Time `json:"created_at"`
 
 	// Authorship of this entry: who appended it (self-reported labels, see
 	// model.Fact). Each entry names its own writer — the journal is a log,
