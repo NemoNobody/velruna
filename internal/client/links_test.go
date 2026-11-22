@@ -235,6 +235,20 @@ func TestCheckLinksEmptyAndNullLinksAreNotEdges(t *testing.T) {
 		t.Errorf("total=%d fetched=%d edges=%d skipped=%d truncated=%v, want 1/1/1/0/false",
 			rep.Total, rep.Fetched, rep.Edges, rep.Skipped, rep.Truncated)
 	}
+
+	// The scan's exists filter stops these docs before any term clause,
+	// so the guard probe (which has no exists filter) is what actually
+	// exercises termMatches: a null or empty-array superseded_by matches
+	// no term — the real store indexes no values for either.
+	for _, probe := range []string{"nil", "arr"} {
+		keys, total, _, err := c.incomingSupersedeRefs(context.Background(), probe)
+		if err != nil {
+			t.Fatalf("incomingSupersedeRefs(%q): %v", probe, err)
+		}
+		if total != 0 || len(keys) != 0 {
+			t.Errorf("probe %q: total=%d keys=%v, want 0 and []", probe, total, keys)
+		}
+	}
 }
 
 // A failed scan is an error, not an empty clean report.

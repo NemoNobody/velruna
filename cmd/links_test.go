@@ -36,15 +36,27 @@ func TestLinksSummaryLineCounts(t *testing.T) {
 		t.Errorf("not-fetched advice missing: %q", got)
 	}
 
-	// At the cap the advice must say the window, not "raise --limit":
-	// from limit=9999 on the scan already asks for the whole result
-	// window, so raising cannot fetch another edge.
+	// At the window edge the advice must say what raising can and cannot
+	// do: from limit=9999 on the scan already asks for the whole result
+	// window, so no higher limit fetches another edge.
 	for _, lim := range []int{9999, 10000, 20000} {
 		rep = &client.LinksReport{Edges: client.LinkScanMax, Fetched: client.LinkScanMax, Total: 12345, Truncated: true}
 		got = linksSummaryLine(rep, lim)
-		if strings.Contains(got, "raise --limit") || !strings.Contains(got, "already spans the 10000 result window") {
+		if strings.Contains(got, "not fetched (raise --limit)") || !strings.Contains(got, "beyond the 10000-hit result window") {
 			t.Errorf("window-span advice wrong at --limit %d: %q", lim, got)
 		}
+	}
+
+	// The pair at limit=9999 must not contradict itself: the missed edge
+	// is beyond the window (raising fetches nothing), while the trimmed
+	// probe edge IS recoverable by raising (to 10000 the trim stops).
+	rep = &client.LinksReport{Edges: 9999, Fetched: 10000, Total: 10001, Truncated: true}
+	got = linksSummaryLine(rep, 9999)
+	if !strings.Contains(got, "1 edge(s) beyond the 10000-hit result window") {
+		t.Errorf("missed clause wrong at 9999: %q", got)
+	}
+	if !strings.Contains(got, "1 edge(s) fetched but left unaudited at --limit (raise --limit)") {
+		t.Errorf("trimmed clause must offer the raise that actually audits it: %q", got)
 	}
 
 	// A scan over a store of exactly limit+1 edges fetched everything but
@@ -55,7 +67,7 @@ func TestLinksSummaryLineCounts(t *testing.T) {
 	if !strings.Contains(got, "1 edge(s) fetched but left unaudited at --limit") {
 		t.Errorf("trimmed probe edge invisible in the summary: %q", got)
 	}
-	if strings.Contains(got, "raise --limit") {
+	if strings.Contains(got, "not fetched (raise --limit)") {
 		t.Errorf("nothing was left unfetched, raise-advice wrong: %q", got)
 	}
 }

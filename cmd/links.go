@@ -92,16 +92,16 @@ func linksSummaryLine(rep *client.LinksReport, limit int) string {
 			effectiveLimit = client.LinkScanDefault
 		}
 		// The scan window is min(limit+1, max_result_window=10000),
-		// so raising stops changing anything from limit=9999 on.
+		// so from limit=9999 on raising cannot FETCH another edge —
+		// though it can still AUDIT more (the trimmed clause below).
 		if effectiveLimit < client.LinkScanMax-1 {
 			line += fmt.Sprintf(", %d edge(s) in the store not fetched (raise --limit)", missed)
 		} else {
-			line += fmt.Sprintf(", %d edge(s) in the store not fetched (--limit already spans the 10000 result window)",
-				missed)
+			line += fmt.Sprintf(", %d edge(s) beyond the 10000-hit result window (no higher --limit fetches them)", missed)
 		}
 	}
 	if trimmed := rep.Fetched - rep.Edges - rep.Skipped; trimmed > 0 {
-		line += fmt.Sprintf(", %d edge(s) fetched but left unaudited at --limit", trimmed)
+		line += fmt.Sprintf(", %d edge(s) fetched but left unaudited at --limit (raise --limit)", trimmed)
 	}
 	return line
 }
