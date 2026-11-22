@@ -381,15 +381,18 @@ for the password instead of putting it in the command line or history.)
 #    default file) — and verify it before writing anything:
 tmp=$(mktemp)                  # a fixed /tmp name can collide or be a planted
                                # symlink; mktemp creates the file private (600)
+trap 'rm -f "$tmp"' EXIT       # the conf can carry a plaintext password: it
+                               # goes away even if this block aborts midway
 jq '.index_name = "velruna_new"' velruna.conf >"$tmp"
 VELRUNA_CONF="$tmp" velruna status | grep 'index:'   # must show velruna_new
 VELRUNA_CONF="$tmp" velruna add reindex:seed "placeholder" context_map -p velruna
-rm "$tmp"                            # the conf can carry a plaintext password
+                               # (run step 1 in one shell session: $tmp lives
+                               # only as long as that session)
 
 # 2. Copy the documents. From here until the swap is done the store must
 #    stay quiet for writes: _reindex reads a point-in-time snapshot of the
-#    source, so a fact updated mid-copy is copied as it was when the scroll
-#    passed it — neither the count check below nor the conflicts tally
+#    source, so a fact updated mid-copy is copied as it was when the copy
+#    started — neither the count check below nor the conflicts tally
 #    notices it. "conflicts": "proceed" only guards destination-side
 #    collisions (a same-_id clash in the target); with an empty target the
 #    tally stays 0 whatever happens in the source. The response fields are
@@ -399,8 +402,11 @@ curl -u "$OS_USER" -H 'Content-Type: application/json' -X POST \
   -d '{"conflicts":"proceed","source":{"index":"velruna"},"dest":{"index":"velruna_new"}}'
 #    The response must report "version_conflicts": 0 and an empty
 #    "failures". If step 2 has to be redone, DELETE velruna_new first (and
-#    clean its stray journal names as in step 5): re-copying into a
-#    populated target collides on every same-_id document.
+#    clean its stray journal names as in step 5), THEN re-run step 1 to
+#    re-create and re-seed the target: repeating step 2 alone would make
+#    _reindex auto-create a missing target with a dynamic mapping — the
+#    very drift this recipe exists to fix — and re-copying into a populated
+#    target collides on every same-_id document.
 
 # 3. Verify the copy against the old store BEFORE removing anything: count
 #    documents on both sides. (Do not use `velruna list | wc -l`: list needs

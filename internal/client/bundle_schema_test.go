@@ -72,6 +72,7 @@ func TestBundleFieldListsMatchTheCurrentSchema(t *testing.T) {
 		}
 		w, ok := want[attrs.Title]
 		if !ok {
+			t.Errorf("bundle carries an unknown index-pattern title %q", attrs.Title)
 			continue
 		}
 		found++
@@ -132,6 +133,7 @@ func TestBundleObjectsResolveAgainstTheCurrentSchema(t *testing.T) {
 			patternTitleByID[o.ID] = attrs.Title
 			set, known := fieldSets[attrs.Title]
 			if !known {
+				t.Errorf("bundle carries an unknown index-pattern title %q", attrs.Title)
 				continue
 			}
 			if attrs.TimeFieldName != wantTime[attrs.Title] {
@@ -209,6 +211,9 @@ func TestBundleObjectsResolveAgainstTheCurrentSchema(t *testing.T) {
 			if !f.Aggregatable {
 				t.Errorf("visualization %s: agg %q (%s) aggregates the non-aggregatable field %q", o.ID, agg.ID, agg.Type, agg.Params.Field)
 			}
+			if agg.Type == "date_histogram" && f.Type != "date" {
+				t.Errorf("visualization %s: date_histogram on %q of type %q — OSD rejects it at panel time", o.ID, agg.Params.Field, f.Type)
+			}
 		}
 
 		var ss struct {
@@ -223,10 +228,19 @@ func TestBundleObjectsResolveAgainstTheCurrentSchema(t *testing.T) {
 		}
 		for _, fl := range ss.Filter {
 			if fl.Meta.Key == "" {
+				// A filter without meta.key is a grouped/nested one: its field
+				// lives in the inner query. The walker only handles flat filters
+				// (the current bundle's shape) — extend it before adding groups.
+				t.Errorf("visualization %s: grouped filter with empty meta.key — extend the walker", o.ID)
 				continue
 			}
-			if _, ok := set[fl.Meta.Key]; !ok {
+			f, ok := set[fl.Meta.Key]
+			if !ok {
 				t.Errorf("visualization %s: filter on %q, absent from pattern %s", o.ID, fl.Meta.Key, title)
+				continue
+			}
+			if !f.Searchable {
+				t.Errorf("visualization %s: filter on the non-searchable field %q — OSD finds nothing for it", o.ID, fl.Meta.Key)
 			}
 		}
 	}
