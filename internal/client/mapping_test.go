@@ -22,6 +22,10 @@ func mappingCase(t *testing.T, failFirst int) (*Client, *fakeOpenSearch, *int) {
 		switch {
 		case r.Method == http.MethodHead && r.Path == "/velruna":
 			return http.StatusOK, ""
+		case r.Method == http.MethodGet && r.Path == "/velruna/_mapping":
+			// The schema check reads this first; an unknown verdict would skip
+			// the mapping reconcile under test.
+			return http.StatusOK, `{}`
 		case r.Method == http.MethodPut && r.Path == "/velruna/_mapping":
 			puts++
 			if puts <= failFirst {
@@ -125,6 +129,8 @@ func TestReconcileMapping403IsExternallyManaged(t *testing.T) {
 		switch {
 		case r.Method == http.MethodHead && r.Path == "/velruna":
 			return http.StatusOK, ""
+		case r.Method == http.MethodGet && r.Path == "/velruna/_mapping":
+			return http.StatusOK, `{}`
 		case r.Method == http.MethodPut && r.Path == "/velruna/_mapping":
 			puts++
 			return http.StatusForbidden, `{"status":403,"error":"no permission"}`

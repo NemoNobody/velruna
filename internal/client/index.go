@@ -92,18 +92,7 @@ func (c *Client) EnsureIndex(ctx context.Context) error {
 	resp, err := c.api.Indices.Exists(ctx, existsReq)
 	switch {
 	case err == nil:
-		// A store written by a newer binary is refused before anything is
-		// written; a store from an older one is upgraded in place by the
-		// mapping reconcile below.
-		if serr := c.ensureSchemaVersion(ctx); serr != nil {
-			return serr
-		}
-		c.reconcileReplicas(ctx)
-		// Best effort, like the replica reconcile: a mapping the cluster
-		// refuses (a field already exists with another type) must not break
-		// reads, and the once-guard stays open so a later run retries.
-		_ = c.reconcileMapping(ctx)
-		return nil
+		return c.adoptExistingIndex(ctx)
 	case resp != nil && resp.StatusCode == http.StatusNotFound:
 		// The index is missing: create it below. The status code is checked
 		// instead of the error type because a HEAD response has no body, so the
@@ -118,9 +107,32 @@ func (c *Client) EnsureIndex(ctx context.Context) error {
 		Body:  bytes.NewReader(body),
 	}); err != nil {
 		if isAlreadyExists(err) {
-			return nil // lost the create race to a concurrent process: the index is there
+			// Lost the create race to a concurrent process: the index is there,
+			// but it was created by someone else — adopt it exactly as if the
+			// HEAD above had seen it (a newer creator's schema must still be
+			// refused; an older one's mapping must still be upgraded).
+			return c.adoptExistingIndex(ctx)
 		}
 		return wrapWriteError("create index", err)
+	}
+	return nil
+}
+
+// adoptExistingIndex runs the checks that belong to a pre-existing index.
+// The mapping reconcile is skipped when the schema verdict is unknown: the
+// reconcile PUT also stamps _meta, and a blind stamp would silently downgrade
+// a store written by a newer binary.
+func (c *Client) adoptExistingIndex(ctx context.Context) error {
+	checked, err := c.ensureSchemaVersion(ctx)
+	if err != nil {
+		return err
+	}
+	c.reconcileReplicas(ctx)
+	if checked {
+		// Best effort, like the replica reconcile: a mapping the cluster
+		// refuses (a field already exists with another type) must not break
+		// reads, and the once-guard stays open so a later run retries.
+		_ = c.reconcileMapping(ctx)
 	}
 	return nil
 }

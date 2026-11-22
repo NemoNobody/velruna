@@ -46,6 +46,36 @@ func TestEnsureIndexRefusesNewerSchema(t *testing.T) {
 	}
 }
 
+// An unreadable mapping is not a verdict: the reconcile PUT also stamps the
+// schema marker, so a blind stamp could downgrade a store written by a newer
+// binary. The mapping write must be skipped, reads must still work.
+func TestEnsureIndexDoesNotStampWhenSchemaUnreadable(t *testing.T) {
+	var puts []string
+	c, _ := newFakeClient(t, func(r recordedRequest) (int, string) {
+		switch {
+		case r.Method == http.MethodHead && r.Path == "/velruna":
+			return http.StatusOK, ""
+		case r.Method == http.MethodGet && r.Path == "/velruna/_mapping":
+			return http.StatusInternalServerError, `{"status":500,"error":"boom"}`
+		case r.Method == http.MethodPut && r.Path == "/velruna/_mapping":
+			puts = append(puts, r.Body)
+			return http.StatusOK, `{"acknowledged":true}`
+		case r.Method == http.MethodGet && strings.HasPrefix(r.Path, "/_cat/indices"):
+			return http.StatusOK, `[]`
+		case r.Method == http.MethodGet && r.Path == "/_nodes/stats/fs":
+			return http.StatusOK, `{"nodes":{}}`
+		}
+		return http.StatusOK, `{}`
+	})
+
+	if err := c.EnsureIndex(context.Background()); err != nil {
+		t.Fatalf("EnsureIndex: %v", err)
+	}
+	if len(puts) != 0 {
+		t.Errorf("stamped the schema marker without reading the stored version: %v", puts)
+	}
+}
+
 // An older store (no marker: every 0.8.x store) is adopted, and the mapping
 // write carries the current schema marker.
 func TestEnsureIndexAdoptsUnversionedStore(t *testing.T) {

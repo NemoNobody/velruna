@@ -140,6 +140,10 @@ func buildJournalPipelineBody(prefix string) map[string]interface{} {
 type installGate struct {
 	mu   sync.Mutex
 	done bool
+	// unreadable marks a check that finished without a verdict (the role may
+	// not read it): the work must not be retried, and callers that act on the
+	// verdict must treat it as unknown.
+	unreadable bool
 }
 
 // infraGate returns the gate for a key, creating it on first use. Keys are
