@@ -41,7 +41,7 @@ type addInput struct {
 type addOutput struct {
 	Key     string `json:"key" jsonschema:"the stored key"`
 	Created bool   `json:"created" jsonschema:"true when the fact was newly created, false when an existing fact was updated"`
-	Changed bool   `json:"changed" jsonschema:"true when a new version was accepted (birth, value correction); false = same-value touch: notes/source moved, observed_at and the journal untouched"`
+	Changed bool   `json:"changed" jsonschema:"true when a new version was accepted (birth, value correction); false = same-value touch: notes/source/qualifiers move, observed_at and the journal untouched"`
 	Status  string `json:"status" jsonschema:"status of the stored fact"`
 	// PreviousSummary names the superseded version at zero journal cost:
 	// the summary the accepted correction replaced ("" when the prior fact
@@ -51,7 +51,7 @@ type addOutput struct {
 	// Note explains the least-obvious answer (a same-value touch): without
 	// it, created=false+changed=false reads like a no-op and agents mis-age
 	// the fact.
-	Note string `json:"note,omitempty" jsonschema:"what exactly this write did when the shape alone does not say (same-value touch: observed_at and age keep counting, notes/source moved only; resurrect: an obsolete fact re-declared alive)"`
+	Note string `json:"note,omitempty" jsonschema:"what exactly this write did when the shape alone does not say (same-value touch: observed_at and age keep counting, notes/source move when supplied; resurrect: an obsolete fact re-declared alive)"`
 	// Redactions names every span the secret guard replaced before storing
 	// (field, detector pattern, size — never the text). Non-empty means the
 	// stored value is SHORTER than the one written: the flag is not noise, it
@@ -169,7 +169,7 @@ func (s *mcpServer) addOne(ctx context.Context, cfg *config.Config, c *client.Cl
 	out := addOutput{Key: in.Key, Created: res.Created, Changed: res.Changed,
 		Status: f.Status, PreviousSummary: res.PreviousSummary, Redactions: redactions}
 	if !res.Created && !res.Changed {
-		out.Note = "same-value touch: observed_at and the journal untouched, the fact keeps aging (re-verify when stale); notes/source moved only"
+		out.Note = "same-value touch: observed_at and the journal untouched, the fact keeps aging (re-verify when stale); notes/source move when supplied, category always, ttl_days/keywords when given"
 		if in.Summary != "" {
 			// A passed summary would rewrite the CURRENT value's table of
 			// contents without a new version — silently misleading in a
@@ -193,7 +193,7 @@ type addBatchOutput struct {
 	// Summary counters: the whole-session ritual without re-reading items.
 	Created int            `json:"created" jsonschema:"items newly created"`
 	Changed int            `json:"changed" jsonschema:"items that accepted a new version (includes created)"`
-	Touched int            `json:"touched" jsonschema:"items touched on the same value (notes/source only)"`
+	Touched int            `json:"touched" jsonschema:"items touched on the same value (no new version)"`
 	Items   []addBatchItem `json:"items" jsonschema:"per-item outcome in request order; a failed item does not roll back the others"`
 }
 
@@ -246,8 +246,14 @@ func (s *mcpServer) addBatch(ctx context.Context, req *mcp.CallToolRequest, in a
 		item := addBatchItem{Key: strings.TrimSpace(it.Key), Created: res.Created, Changed: res.Changed, Status: res.Status, Redactions: res.Redactions}
 		if err != nil {
 			// Label the item, not the single-add tool: an agent reading a
-			// batch answer must not conclude velruna_add itself broke.
-			item.Error = "velruna_add_batch item " + strconv.Itoa(i) + ": " + strings.TrimPrefix(err.Error(), "velruna_add: ")
+			// batch answer must not conclude velruna_add itself broke. Strip
+			// both single-add labels — validation errors arrive as "velruna_add:",
+			// store-wrapped failures as "velruna_add failed:" (storeError).
+			msg := err.Error()
+			for _, p := range []string{"velruna_add: ", "velruna_add failed: "} {
+				msg = strings.TrimPrefix(msg, p)
+			}
+			item.Error = "velruna_add_batch item " + strconv.Itoa(i) + ": " + msg
 		}
 		// The counters read what LANDED, not only what completed cleanly: a
 		// partial success stored the fact (item.Error names the lagged

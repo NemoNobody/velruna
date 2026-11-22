@@ -92,9 +92,10 @@ func redactionsForFields(rows []model.Redaction, fields ...string) []model.Redac
 }
 
 // Add stores a fact under its key. Three cases: the key is new (created, then
-// journaled and linked); the value is unchanged (notes/source/status move,
-// plus the given qualifiers — category always, ttl_days/keywords when
-// non-empty — while observed_at must not, the observation is old and only the
+// journaled and linked); the value is unchanged (the touch re-stamps status,
+// moves notes/source when a new one was supplied and the given qualifiers —
+// category always, ttl_days/keywords when non-empty — while observed_at must
+// not, the observation is old and only the
 // qualifier is new, and the journal is untouched; the exception is a dead
 // fact: an unchanged re-add of an obsolete fact is a fresh verification,
 // journaled like the Patch resurrect, and observed_at moves); the value
@@ -431,7 +432,15 @@ func (c *Client) Add(ctx context.Context, f *model.Fact) (AddResult, error) {
 		return AddResult{}, wrapWriteError("add fact", err)
 	}
 	if _, jErr := c.appendJournalID(ctx, entry, ref, "", false); jErr != nil {
-		return AddResult{Changed: true, PreviousSummary: existing.Summary, Resurrected: existing.Status == "obsolete"}, fmt.Errorf("add: correction accepted, the journal entry lagged: %w", jErr)
+		// The lag error must name the status transition the doc already
+		// applied — the typed answer is discarded at the MCP error edge, so
+		// on a resurrection over an obsolete fact the text is the only
+		// surface that says the fact is alive again.
+		msg := "correction accepted"
+		if existing.Status == "obsolete" {
+			msg = "correction accepted (resurrecting an obsolete fact)"
+		}
+		return AddResult{Changed: true, PreviousSummary: existing.Summary, Resurrected: existing.Status == "obsolete"}, fmt.Errorf("add: %s, the journal entry lagged: %w", msg, jErr)
 	}
 	// The value was accepted as a new version (journal entry + correction):
 	// changed=true, and the summary the correction is replacing is reported

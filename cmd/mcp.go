@@ -111,12 +111,15 @@ func runMCPServer(confPath string) error {
 	mcp.AddTool(srv, &mcp.Tool{
 		Name: "velruna_add",
 		Description: "Store a verified fact: file locations, config and endpoint " +
-			"values, behavior. Re-use the same key to correct a fact — the " +
-			"accepted value is appended to the history journal and the fact " +
-			"points at it. Re-adding the same value is a notes/source touch: no " +
-			"journal entry, observed_at stays (staleness keeps aging — a re-read " +
-			"is not a re-verification), status returns to verified " +
-			"(resurrects an obsolete fact), updated_by moves. The answer says " +
+			"values, behavior. Re-use the same key to correct a fact — the fact " +
+			"is updated to point at a preallocated journal-entry id (doc-first), " +
+			"then the entry is appended under it. Re-adding the same value is a " +
+			"touch: no journal entry, observed_at stays (staleness keeps aging — " +
+			"a re-read is not a re-verification), notes/source move when supplied " +
+			"(plus category always, and ttl_days/keywords when given), updated_by " +
+			"moves — except an obsolete fact, whose re-add resurrects it: status " +
+			"returns to verified, observed_at moves, and the event is journaled. " +
+			"The answer says " +
 			"what happened: created/changed (changed=false is a same-value " +
 			"touch) and previous_summary names the superseded version. Values longer " +
 			"than summary_min_len " +
