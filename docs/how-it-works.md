@@ -31,6 +31,7 @@ document keyed by its `key` (the key is the document ID).
 | `updated_by` | keyword | self-reported label of the last writer (moves on every write) |
 | `confirmed_by` | object (`enabled: false`) | who re-verified the fact (the confirmed-by set) — stored, never indexed |
 | `current_ref` | keyword | id of the journal entry that carries the current value |
+| `superseded_by` | keyword | key of the fact that replaces this one (a succession link); absent while the fact is current |
 | `history` | object (`enabled: false`) | **legacy** pre-journal array `[{value, observed_at, source}]` — stored, never indexed; `velruna migrate-history` moves it into the journal and removes the field |
 
 The catalog is applied twice: on index creation, and additively on an existing
@@ -383,6 +384,9 @@ tmp=$(mktemp)                  # a fixed /tmp name can collide or be a planted
                                # symlink; mktemp creates the file private (600)
 trap 'rm -f "$tmp"' EXIT       # the conf can carry a plaintext password: it
                                # goes away even if this block aborts midway
+                               # (run step 1 in a fresh shell: the trap
+                               # replaces any existing EXIT trap and $tmp
+                               # lives only inside this session)
 jq '.index_name = "velruna_new"' velruna.conf >"$tmp"
 VELRUNA_CONF="$tmp" velruna status | grep 'index:'   # must show velruna_new
 VELRUNA_CONF="$tmp" velruna add reindex:seed "placeholder" context_map -p velruna
@@ -392,11 +396,13 @@ VELRUNA_CONF="$tmp" velruna add reindex:seed "placeholder" context_map -p velrun
 # 2. Copy the documents. From here until the swap is done the store must
 #    stay quiet for writes: _reindex reads a point-in-time snapshot of the
 #    source, so a fact updated mid-copy is copied as it was when the copy
-#    started — neither the count check below nor the conflicts tally
-#    notices it. "conflicts": "proceed" only guards destination-side
-#    collisions (a same-_id clash in the target); with an empty target the
-#    tally stays 0 whatever happens in the source. The response fields are
-#    a sanity check, never a substitute for a quiet store.
+#    started — neither the count check below nor the response fields
+#    notice it. "conflicts": "proceed" matters only for destination-side
+#    version conflicts (external versioning in the target, or a writer
+#    racing into it); with the default internal versioning a same-_id
+#    document in the target is silently overwritten and counted as
+#    "updated", never as a conflict. The response is a sanity check,
+#    never a substitute for a quiet store.
 curl -u "$OS_USER" -H 'Content-Type: application/json' -X POST \
   http://localhost:9200/_reindex \
   -d '{"conflicts":"proceed","source":{"index":"velruna"},"dest":{"index":"velruna_new"}}'
@@ -406,7 +412,9 @@ curl -u "$OS_USER" -H 'Content-Type: application/json' -X POST \
 #    re-create and re-seed the target: repeating step 2 alone would make
 #    _reindex auto-create a missing target with a dynamic mapping — the
 #    very drift this recipe exists to fix — and re-copying into a populated
-#    target collides on every same-_id document.
+#    target silently overwrites the same-_id documents (they land in
+#    "updated": the tally stays 0 and the counts still match), so the
+#    DELETE is the only thing that makes a redo safe.
 
 # 3. Verify the copy against the old store BEFORE removing anything: count
 #    documents on both sides. (Do not use `velruna list | wc -l`: list needs

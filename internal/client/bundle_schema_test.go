@@ -58,7 +58,7 @@ func TestBundleFieldListsMatchTheCurrentSchema(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	found := 0
+	found := map[string]bool{}
 	for _, o := range objs {
 		if o.Type != "index-pattern" {
 			continue
@@ -75,13 +75,15 @@ func TestBundleFieldListsMatchTheCurrentSchema(t *testing.T) {
 			t.Errorf("bundle carries an unknown index-pattern title %q", attrs.Title)
 			continue
 		}
-		found++
+		found[attrs.Title] = true
 		if attrs.Fields != w {
 			t.Errorf("bundle field list for %s is stale: re-run 'velruna dashboards gen-fields' and commit the bundle", attrs.Title)
 		}
 	}
-	if found != len(want) {
-		t.Errorf("bundle carried %d of %d known patterns", found, len(want))
+	if len(found) != len(want) {
+		// Count distinct titles: two objects sharing one title must not
+		// mask a pattern the bundle lost.
+		t.Errorf("bundle carried %d of %d known pattern titles", len(found), len(want))
 	}
 }
 
@@ -130,12 +132,15 @@ func TestBundleObjectsResolveAgainstTheCurrentSchema(t *testing.T) {
 			if err := json.Unmarshal(o.Attributes, &attrs); err != nil {
 				t.Fatal(err)
 			}
-			patternTitleByID[o.ID] = attrs.Title
 			set, known := fieldSets[attrs.Title]
 			if !known {
+				// Do not register it: a registered unknown title turns every
+				// field check of every visualization hanging on that pattern
+				// into "absent from pattern <unknown>" noise.
 				t.Errorf("bundle carries an unknown index-pattern title %q", attrs.Title)
 				continue
 			}
+			patternTitleByID[o.ID] = attrs.Title
 			if attrs.TimeFieldName != wantTime[attrs.Title] {
 				t.Errorf("pattern %s: timeFieldName = %q, want %q", attrs.Title, attrs.TimeFieldName, wantTime[attrs.Title])
 				continue
@@ -164,10 +169,12 @@ func TestBundleObjectsResolveAgainstTheCurrentSchema(t *testing.T) {
 			t.Fatalf("visualization %s: references: %v", o.ID, err)
 		}
 		title := ""
+		refNameToTitle := map[string]string{}
 		for _, r := range refs {
 			if r.Type == "index-pattern" {
 				if ti, ok := patternTitleByID[r.ID]; ok {
 					title = ti
+					refNameToTitle[r.Name] = ti
 				}
 			}
 		}
@@ -219,7 +226,8 @@ func TestBundleObjectsResolveAgainstTheCurrentSchema(t *testing.T) {
 		var ss struct {
 			Filter []struct {
 				Meta struct {
-					Key string `json:"key"`
+					Index string `json:"index"`
+					Key   string `json:"key"`
 				} `json:"meta"`
 			} `json:"filter"`
 		}
@@ -234,9 +242,30 @@ func TestBundleObjectsResolveAgainstTheCurrentSchema(t *testing.T) {
 				t.Errorf("visualization %s: grouped filter with empty meta.key — extend the walker", o.ID)
 				continue
 			}
-			f, ok := set[fl.Meta.Key]
+			// meta.index names the pattern the filter hangs on: a pattern id
+			// directly, or a reference name (the exporter writes the sentinel
+			// "kibanaSavedObjectMeta.searchSourceJSON.index" for the vis's own
+			// pattern, which resolves through the references).
+			fset, ftitle := set, title
+			if fl.Meta.Index != "" {
+				ft, ok := patternTitleByID[fl.Meta.Index]
+				if !ok {
+					ft, ok = refNameToTitle[fl.Meta.Index]
+				}
+				if !ok {
+					t.Errorf("visualization %s: filter on %q names pattern %q the vis does not reference", o.ID, fl.Meta.Key, fl.Meta.Index)
+					continue
+				}
+				f2, ok := fieldSets[ft]
+				if !ok {
+					t.Errorf("visualization %s: filter names pattern %q the bundle cannot bake", o.ID, ft)
+					continue
+				}
+				fset, ftitle = f2, ft
+			}
+			f, ok := fset[fl.Meta.Key]
 			if !ok {
-				t.Errorf("visualization %s: filter on %q, absent from pattern %s", o.ID, fl.Meta.Key, title)
+				t.Errorf("visualization %s: filter on %q, absent from pattern %s", o.ID, fl.Meta.Key, ftitle)
 				continue
 			}
 			if !f.Searchable {
