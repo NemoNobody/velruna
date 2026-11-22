@@ -413,7 +413,7 @@ in front:
 
 Environment variables override the file (the complete list; `velruna status`
 lists the active ones by name, never by value):
-`OPENSEARCH_URL`, `OPENSEARCH_USER`, `OPENSEARCH_PASSWORD`,
+`OPENSEARCH_URL`, `OPENSEARCH_URLS`, `OPENSEARCH_USER`, `OPENSEARCH_PASSWORD`,
 `OPENSEARCH_INSECURE_SKIP_VERIFY`, `VELRUNA_CONF`, `VELRUNA_INDEX`,
 `VELRUNA_HISTORY_PERIOD`, `VELRUNA_HISTORY_LIMIT`, `VELRUNA_SUMMARY_MIN_LEN`,
 `VELRUNA_SUMMARY_MAX_LEN`, `VELRUNA_SECRET_GUARD`,
@@ -502,12 +502,17 @@ What the app touches, permission by permission:
 | Target | Why | Actions |
 |---|---|---|
 | cluster | version probe, `status` health/disk, journal infra | `cluster:monitor/main`, `cluster:monitor/health`, `cluster:monitor/nodes/stats`, `manage_index_templates`, `manage_ingest_pipelines` |
-| `velruna` (facts) | index checks, read, search, create/update docs, replica-count realignment | `read`, `search`, `indices:admin/get`, `indices:data/write/index`, `indices:data/write/update`, `indices:admin/create`, `indices:admin/settings/update` (drift correction of `number_of_replicas`) — **no delete** (the app never deletes facts; `obsolete` is a status, and index loss must be an admin decision) |
+| `velruna` (facts) | index checks, read, search, create/update docs, schema check + additive mapping upgrade, replica-count realignment | `read`, `search`, `indices:admin/get`, `indices:admin/mappings/get` (schema version), `indices:admin/mappings/put` (additive upgrade and the version stamp), `indices:data/write/index`, `indices:data/write/update`, `indices:admin/create`, `indices:admin/settings/update` (drift correction of `number_of_replicas`) — **no delete** (the app never deletes facts; `obsolete` is a status, and index loss must be an admin decision) |
 | `velruna-history-*` | append entries, read journal, `prune`, pin the ts pipeline | `read`, `search`, `indices:admin/get`, `indices:data/write/*` (append-only by app design; `delete` here exists only for the manual `prune`), `indices:admin/create` (a new period index is auto-created on the first append of that period), `indices:admin/settings/update` (the app pins the ts pipeline on journal indices) |
 | `velruna-docs` | fetch cache: store, read, search, re-tag snapshots, replica-count realignment | `read`, `search`, `indices:admin/get`, `indices:data/write/index`, `indices:data/write/update` (re-tagging a stored snapshot with a different project), `indices:admin/create`, `indices:admin/settings/update` |
 
 `indices:admin/get` covers the index-existence HEAD the app runs on every
 start and the `GET /<index>` settings read behind `velruna status`.
+`indices:admin/mappings/get` is the schema-version probe: without it the
+client cannot tell which schema the store carries, so it skips the additive
+mapping upgrade (the app still works, but new fields are typed dynamically on
+their first write instead of as keyword/date). `indices:admin/mappings/put`
+lets the client perform that upgrade and stamp the version.
 
 An older role may be missing a later permission: journal appends also need
 `indices:admin/create` and `indices:admin/settings/update` on
@@ -538,6 +543,8 @@ cat > /tmp/velruna_role.json << 'EOF'
   "index_permissions": [
     {"index_patterns": ["velruna"],
      "allowed_actions": ["read", "search", "indices:admin/get",
+                         "indices:admin/mappings/get",
+                         "indices:admin/mappings/put",
                          "indices:data/write/index",
                          "indices:data/write/update", "indices:admin/create",
                          "indices:admin/settings/update"]},

@@ -88,7 +88,11 @@ func (c *Client) ensureSchemaVersion(ctx context.Context) (checked bool, err err
 			// stamping 1 now would overwrite the newer marker with a lie.
 			return false, nil
 		}
-		found = v
+		if v > found {
+			// An alias can resolve to several backing indices (their order in
+			// the response is not defined): the newest marker wins.
+			found = v
+		}
 	}
 	if found > SchemaVersion {
 		return false, fmt.Errorf("the store at %s was written by a newer velruna (schema %d, this binary "+

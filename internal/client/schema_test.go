@@ -159,6 +159,64 @@ func TestEnsureIndexCreateRaceChecksSchema(t *testing.T) {
 	}
 }
 
+// A marker that exists but is not an integer (hand-edited or a future
+// scheme) is an unknown verdict, not "unversioned": stamping 1 would
+// overwrite a newer marker with a lie.
+func TestEnsureIndexTreatsForeignMarkerAsUnknown(t *testing.T) {
+	var puts []string
+	c, _ := newFakeClient(t, schemaResponder(
+		`{"velruna":{"mappings":{"_meta":{"velruna_schema":"2"},"properties":{}}}}`, &puts))
+
+	if err := c.EnsureIndex(context.Background()); err != nil {
+		t.Fatalf("EnsureIndex: %v", err)
+	}
+	if len(puts) != 0 {
+		t.Errorf("stamped over a marker it could not read: %v", puts)
+	}
+}
+
+// An unparsable mapping body is not a verdict either.
+func TestEnsureIndexTreatsUnparsableMappingAsUnknown(t *testing.T) {
+	var puts []string
+	c, _ := newFakeClient(t, schemaResponder(`not json at all`, &puts))
+
+	if err := c.EnsureIndex(context.Background()); err != nil {
+		t.Fatalf("EnsureIndex: %v", err)
+	}
+	if len(puts) != 0 {
+		t.Errorf("stamped without reading the version: %v", puts)
+	}
+}
+
+// A 403 is a role verdict and is cached: a read-only role must not pay a
+// refused GET on every tool call.
+func TestEnsureIndexCachesUnreadableMappings(t *testing.T) {
+	gets := 0
+	c, _ := newFakeClient(t, func(r recordedRequest) (int, string) {
+		switch {
+		case r.Method == http.MethodHead && r.Path == "/velruna":
+			return http.StatusOK, ""
+		case r.Method == http.MethodGet && r.Path == "/velruna/_mapping":
+			gets++
+			return http.StatusForbidden, `{"status":403,"error":"no permission"}`
+		case r.Method == http.MethodGet && strings.HasPrefix(r.Path, "/_cat/indices"):
+			return http.StatusOK, `[]`
+		case r.Method == http.MethodGet && r.Path == "/_nodes/stats/fs":
+			return http.StatusOK, `{"nodes":{}}`
+		}
+		return http.StatusOK, `{}`
+	})
+
+	for i := 0; i < 3; i++ {
+		if err := c.EnsureIndex(context.Background()); err != nil {
+			t.Fatalf("EnsureIndex #%d: %v", i, err)
+		}
+	}
+	if gets != 1 {
+		t.Errorf("mapping GETs = %d, want 1 (403 is cached as unreadable)", gets)
+	}
+}
+
 // An older store (no marker: every 0.8.x store) is adopted, and the mapping
 // write carries the current schema marker.
 func TestEnsureIndexAdoptsUnversionedStore(t *testing.T) {

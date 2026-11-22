@@ -46,10 +46,12 @@ func (c *Client) reconcileMapping(ctx context.Context) error {
 		Indices: []string{c.cfg.IndexName},
 		Body:    bytes.NewReader(body),
 	}); err != nil {
-		if statusIs(err, 403) {
+		if statusIs(err, 403) && !isClusterBlock(err) {
 			// A read-only or DLS role cannot manage mappings: the index is
 			// managed externally, which is not a retryable failure. Closing the
-			// gate keeps every read from paying a refused PUT.
+			// gate keeps every read from paying a refused PUT. A cluster block
+			// (disk flood stage) also answers 403, but it IS transient: leave
+			// the gate open so the reconcile retries once the block clears.
 			gate.done = true
 			return nil
 		}

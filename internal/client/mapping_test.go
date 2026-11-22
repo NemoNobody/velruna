@@ -155,7 +155,36 @@ func TestReconcileMapping403IsExternallyManaged(t *testing.T) {
 	}
 }
 
-// TestMappingReconcileWaitsForTheFirstPass mirrors the journal-infra wait test:
+// TestReconcileMappingClusterBlockKeepsGateOpen: a cluster block (disk flood
+// stage) also answers 403, but it is transient — closing the gate would skip
+// the upgrade until a restart.
+func TestReconcileMappingClusterBlockKeepsGateOpen(t *testing.T) {
+	puts := 0
+	c, fake := newFakeClientCfg(t, func(cfg *config.Config) {
+		cfg.IndexReplicas = 0
+	}, func(r recordedRequest) (int, string) {
+		switch {
+		case r.Method == http.MethodHead && r.Path == "/velruna":
+			return http.StatusOK, ""
+		case r.Method == http.MethodGet && r.Path == "/velruna/_mapping":
+			return http.StatusOK, `{}`
+		case r.Method == http.MethodPut && r.Path == "/velruna/_mapping":
+			puts++
+			return http.StatusForbidden, `{"error":{"type":"cluster_block_exception","reason":"index read-only (disk watermark)"},"status":403}`
+		}
+		return http.StatusOK, `{}`
+	})
+	for i := 0; i < 2; i++ {
+		if err := c.EnsureIndex(context.Background()); err != nil {
+			t.Fatalf("EnsureIndex #%d: %v", i, err)
+		}
+	}
+	if got := len(fake.requestsFor(http.MethodPut, "/velruna/_mapping")); got != 2 {
+		t.Fatalf("mapping puts = %d, want 2 (a cluster block must not close the gate)", got)
+	}
+}
+
+// TestReconcileMappingWaitsForTheFirstPass mirrors the journal-infra wait test:
 // a second caller must not proceed while the first PUT is in flight, or a write
 // could race the additive mapping and pin a field dynamically.
 func TestMappingReconcileWaitsForTheFirstPass(t *testing.T) {
