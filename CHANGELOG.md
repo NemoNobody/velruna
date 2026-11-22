@@ -13,15 +13,16 @@ notes).
 - `velruna links check`: one bounded read (`--limit`, default 1000 edges) walks
   every fact that carries a `superseded_by` link and reports the three ways an
   edge goes wrong — `dangling` (the target is gone), `unverified` (the target
-  is not verified), `cycle` (the edge loops). Exit 1 when findings exist.
-  Repair by repointing the source (`velruna_patch superseded_by`) or retiring
-  it too.
+  is not verified), `cycle` (the edge loops). Exit 1 when findings exist, exit
+  2 when the check itself could not run. Repair by repointing the source
+  (`velruna_patch superseded_by`) or retiring it too.
 - retire guard: `velruna_obsolete` and a `velruna_patch` status flip to
-  `obsolete` are refused while other facts point at the target with
-  `superseded_by` — the refusal names the referrers (ten plus a count) and
-  points at `velruna links check` to map the graph. A failed probe fails the
-  retirement, never a false "no links"; the guard is advisory like every
-  check-then-write, so readers must still tolerate a dangling target.
+  `obsolete` are refused while other verified facts point at the target with
+  `superseded_by` (a self-link never blocks) — the refusal names the referrers
+  (ten plus a count) and points at `velruna links check` to map the graph. A
+  failed probe fails the retirement, never a false "no links"; the guard is
+  advisory like every check-then-write, so readers must still tolerate a
+  dangling target.
 - `velruna dashboards gen-fields`: regenerates the bundled index-pattern field
   lists natively from the binary (token-preserving rewrite of the bundle);
   the python generator is gone.
@@ -32,7 +33,10 @@ notes).
 - creds: keyring entries are named after the store, not the URL
   (`cluster/<cluster_uuid>`, config key `opensearch_cluster`): moving the
   store to another host or port keeps the same credentials. The uuid is
-  discovered at `creds set`; legacy host-named entries stay readable.
+  discovered at `creds set`; a rotation while the store is silent reuses the
+  name the config already records instead of stranding the password under a
+  host account; `creds rm --name` cleans entries the config no longer names;
+  legacy host-named entries stay readable.
 - MCP bundle (`.mcpb`): every release now attaches a universal
   `velruna-<version>.mcpb` plus per-OS `-darwin`, `-linux` and `-windows`
   bundles. A desktop client installs one with a configuration dialog —
