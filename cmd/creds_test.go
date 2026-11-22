@@ -86,35 +86,41 @@ func TestCredsSetFallsBackToLegacyHostWhenStoreSilent(t *testing.T) {
 	credsTestEnv(t)
 	stored := fakeKeyringCmd(t)
 
+	// A closed server answers instantly and deterministically; port 1 can be
+	// firewalled into a slow timeout on some hosts.
+	dead := httptest.NewServer(http.NotFoundHandler())
+	deadURL := dead.URL
+	dead.Close()
+	host := strings.TrimPrefix(deadURL, "http://")
+
 	cmd := CredsCmd()
 	var out bytes.Buffer
 	cmd.SetOut(&out)
 	cmd.SetErr(&out)
 	withStdin(t, "sekret pw\n", func() {
-		// Port 1 answers instantly with ECONNREFUSED: the probe fails fast.
-		cmd.SetArgs([]string{"set", "--url", "http://127.0.0.1:1"})
+		cmd.SetArgs([]string{"set", "--url", deadURL})
 		if err := cmd.Execute(); err != nil {
 			t.Fatalf("creds set: %v", err)
 		}
 	})
-	if got := out.String(); !strings.Contains(got, "account=127.0.0.1:1") {
+	if got := out.String(); !strings.Contains(got, "account="+host) {
 		t.Errorf("set output: %q", got)
 	}
 	if !strings.Contains(out.String(), "legacy account") {
 		t.Errorf("the silent-store fallback must be reported:\n%s", out.String())
 	}
-	if stored["velruna/127.0.0.1:1"] != "sekret pw" {
+	if stored["velruna/"+host] != "sekret pw" {
 		t.Errorf("keyring after set: %v", stored)
 	}
 
 	out.Reset()
 	cmd = CredsCmd()
 	cmd.SetOut(&out)
-	cmd.SetArgs([]string{"rm", "--url", "http://127.0.0.1:1"})
+	cmd.SetArgs([]string{"rm", "--url", deadURL})
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("creds rm: %v", err)
 	}
-	if _, ok := stored["velruna/127.0.0.1:1"]; ok {
+	if _, ok := stored["velruna/"+host]; ok {
 		t.Error("entry survived rm")
 	}
 	if !strings.Contains(out.String(), "removed") {
@@ -125,7 +131,7 @@ func TestCredsSetFallsBackToLegacyHostWhenStoreSilent(t *testing.T) {
 	out.Reset()
 	cmd = CredsCmd()
 	cmd.SetOut(&out)
-	cmd.SetArgs([]string{"rm", "--url", "http://127.0.0.1:1"})
+	cmd.SetArgs([]string{"rm", "--url", deadURL})
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("creds rm (absent): %v", err)
 	}
@@ -264,6 +270,109 @@ func TestCredsRmClusterAndLegacy(t *testing.T) {
 	}
 }
 
+// A rotated password must land under the account the runtime reads first. When
+// the store is silent but the config already names it (a previous successful
+// set), 'set' must reuse that name instead of falling back to the legacy host
+// account, where the rotation would report success and change nothing.
+func TestCredsSetRotationReusesRecordedCluster(t *testing.T) {
+	credsTestEnv(t)
+	stored := fakeKeyringCmd(t)
+	stored["velruna/cluster/lab"] = "old pw"
+
+	dead := httptest.NewServer(http.NotFoundHandler())
+	deadURL := dead.URL
+	dead.Close()
+	host := strings.TrimPrefix(deadURL, "http://")
+
+	conf := os.Getenv("VELRUNA_CONF")
+	if err := os.WriteFile(conf, []byte(`{"opensearch_url":"`+deadURL+`","opensearch_cluster":"lab"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	cmd := CredsCmd()
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	withStdin(t, "new pw\n", func() {
+		cmd.SetArgs([]string{"set"})
+		if err := cmd.Execute(); err != nil {
+			t.Fatalf("creds set: %v", err)
+		}
+	})
+	if got := out.String(); !strings.Contains(got, "reusing the store name") {
+		t.Errorf("the name reuse must be reported:\n%s", got)
+	}
+	if stored["velruna/cluster/lab"] != "new pw" {
+		t.Errorf("cluster entry after rotation: %v", stored)
+	}
+	if _, ok := stored["velruna/"+host]; ok {
+		t.Errorf("rotation must not create a legacy entry beside the named one: %v", stored)
+	}
+}
+
+// An answer without a usable cluster_uuid is not an identity: storing under an
+// empty name would create an entry nothing reads back.
+func TestProbeClusterUUIDBlankIsError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"cluster_name":"x","cluster_uuid":"  "}`))
+	}))
+	defer srv.Close()
+	if _, err := probeClusterUUID(srv.URL, nil, "pw"); err == nil {
+		t.Error("a blank cluster_uuid must be reported as an error")
+	}
+}
+
+// The store may be alive behind a node that is not first in the list: the probe
+// must fail over across every configured node before declaring it silent.
+func TestProbeClusterUUIDFailsOverAcrossNodes(t *testing.T) {
+	live := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"cluster_name":"x","cluster_uuid":"uuid-live"}`))
+	}))
+	defer live.Close()
+	dead := httptest.NewServer(http.NotFoundHandler())
+	deadURL := dead.URL
+	dead.Close()
+
+	base := config.DefaultConfig()
+	base.OpenSearchURLs = []string{deadURL, live.URL}
+	uuid, err := probeClusterUUID(base.EffectiveURLs()[0], base, "pw")
+	if err != nil {
+		t.Fatalf("the probe must fail over to the live node: %v", err)
+	}
+	if uuid != "uuid-live" {
+		t.Errorf("probed uuid = %q", uuid)
+	}
+}
+
+// Entries created for a store the current config no longer points at are only
+// reachable through an explicit label; rm must not touch the configured store's
+// legacy entry while cleaning up an orphan by --name.
+func TestCredsRmByName(t *testing.T) {
+	credsTestEnv(t)
+	stored := fakeKeyringCmd(t)
+	stored["velruna/cluster/lab"] = "orphan pw"
+	stored["velruna/127.0.0.1:9"] = "current legacy pw"
+
+	cmd := CredsCmd()
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetArgs([]string{"rm", "--name", "lab", "--url", "http://127.0.0.1:9"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("creds rm --name: %v", err)
+	}
+	if _, ok := stored["velruna/cluster/lab"]; ok {
+		t.Error("--name must remove the named cluster entry")
+	}
+	if _, ok := stored["velruna/127.0.0.1:9"]; !ok {
+		t.Errorf("rm --name must not clear the legacy entry without --legacy: %v", stored)
+	}
+	if !strings.Contains(out.String(), "removed") {
+		t.Errorf("rm --name output: %q", out.String())
+	}
+}
+
 // The secret never leaves the keyring through the CLI: 'creds get' was removed
 // precisely so no caller can print the password, and stdout of the remaining
 // subcommands must stay secret-free.
@@ -307,18 +416,18 @@ func TestCredsRefuseUserinfo(t *testing.T) {
 		t.Errorf("accountFor echoes the password on parse failure: %q", got)
 	}
 
-	// credsTarget (used by rm) refuses the userinfo flag.
+	// credsLoadTarget refuses the userinfo flag.
 	old := credsFlags.url
 	t.Cleanup(func() { credsFlags.url = old })
 	credsFlags.url = "https://admin:hunter2@os.test:9200"
-	if _, err := credsTarget(); err == nil {
-		t.Error("credsTarget: want refusal for userinfo --url, got nil")
+	if _, _, err := credsLoadTarget(); err == nil {
+		t.Error("credsLoadTarget: want refusal for userinfo --url, got nil")
 	} else if strings.Contains(err.Error(), "hunter2") {
-		t.Errorf("credsTarget echoes the password: %v", err)
+		t.Errorf("credsLoadTarget echoes the password: %v", err)
 	}
 	credsFlags.url = "https://os.test:9200"
-	if got, err := credsTarget(); err != nil || got != "https://os.test:9200" {
-		t.Errorf("credsTarget clean url = %q, %v", got, err)
+	if _, got, err := credsLoadTarget(); err != nil || got != "https://os.test:9200" {
+		t.Errorf("credsLoadTarget clean url = %q, %v", got, err)
 	}
 }
 

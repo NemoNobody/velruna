@@ -206,8 +206,8 @@ func TestSetConfigValuePreservesTheFile(t *testing.T) {
 	if err := os.WriteFile(conf, []byte(body), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := SetConfigValue(conf, "opensearch_cluster", "uuid-1"); err != nil {
-		t.Fatalf("SetConfigValue: %v", err)
+	if prev, err := SetConfigValue(conf, "opensearch_cluster", "uuid-1"); err != nil || prev != "" {
+		t.Fatalf("SetConfigValue: prev=%q err=%v", prev, err)
 	}
 	data, err := os.ReadFile(conf)
 	if err != nil {
@@ -227,8 +227,8 @@ func TestSetConfigValuePreservesTheFile(t *testing.T) {
 	}
 	// Idempotent: a second write of the same value is a no-op.
 	before, _ := os.ReadFile(conf)
-	if err := SetConfigValue(conf, "opensearch_cluster", "uuid-1"); err != nil {
-		t.Fatalf("SetConfigValue (again): %v", err)
+	if prev, err := SetConfigValue(conf, "opensearch_cluster", "uuid-1"); err != nil || prev != "uuid-1" {
+		t.Fatalf("SetConfigValue (again): prev=%q err=%v (the previous value must come back for the orphan note)", prev, err)
 	}
 	after, _ := os.ReadFile(conf)
 	if string(before) != string(after) {

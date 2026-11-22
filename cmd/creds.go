@@ -71,19 +71,14 @@ func refuseUserinfo(raw string) error {
 	return nil
 }
 
-// credsTarget resolves the URL whose host keys the legacy keyring entry.
-func credsTarget() (string, error) {
-	if credsFlags.url != "" {
-		if err := refuseUserinfo(credsFlags.url); err != nil {
-			return "", err
-		}
-		return credsFlags.url, nil
+// recordedClusterName is the store name the config already declares
+// (opensearch_cluster / OPENSEARCH_CLUSTER). The runtime, creds status and
+// creds rm all resolve the candidate account from it the same way.
+func recordedClusterName(cfg *config.Config) string {
+	if cfg == nil {
+		return ""
 	}
-	cfg, err := config.LoadConfig()
-	if err != nil {
-		return "", err
-	}
-	return targetFromConfig(cfg), nil
+	return strings.TrimSpace(cfg.OpenSearchCluster)
 }
 
 // credsLoadTarget returns the effective config (nil when --url overrides the
@@ -149,13 +144,28 @@ host[:port] account and the output says so.`,
 			if cluster == "" {
 				uuid, perr := probeClusterUUID(target, cfg, pw)
 				if perr != nil {
-					// The store did not confirm its identity: keying by host is
-					// the only name left. Saying so keeps a later "entry
-					// disappeared after the node moved" explainable.
-					if _, werr := fmt.Fprintf(errOut, "warning: the store at %s did not confirm its "+
-						"identity (%v): storing under the legacy account %s\n",
-						config.RedactURL(target), perr, host); werr != nil {
-						fatalErr(werr)
+					if recorded := recordedClusterName(cfg); recorded != "" {
+						// The config already names this store (a previous
+						// successful set). Reuse that name: the runtime reads
+						// cluster/<name> BEFORE the legacy host entry, so a
+						// rotated password stored only under the host account
+						// would sit under an entry nothing reads first — the
+						// rotation would report success and change nothing.
+						cluster = recorded
+						if _, werr := fmt.Fprintf(errOut, "warning: the store at %s did not confirm its "+
+							"identity (%v): reusing the store name from the config, storing under %s\n",
+							config.RedactURL(target), perr, config.ClusterAccount(cluster)); werr != nil {
+							fatalErr(werr)
+						}
+					} else {
+						// The store did not confirm its identity: keying by host is
+						// the only name left. Saying so keeps a later "entry
+						// disappeared after the node moved" explainable.
+						if _, werr := fmt.Fprintf(errOut, "warning: the store at %s did not confirm its "+
+							"identity (%v): storing under the legacy account %s\n",
+							config.RedactURL(target), perr, host); werr != nil {
+							fatalErr(werr)
+						}
 					}
 				} else {
 					cluster = uuid
@@ -188,12 +198,15 @@ func probeClusterUUID(target string, base *config.Config, pw string) (string, er
 	if base != nil {
 		pc.OpenSearchUser = base.OpenSearchUser
 		pc.InsecureSkipVerify = base.InsecureSkipVerify
+		// The store may be alive behind a node that is not the first in the
+		// list: hand the probe every configured node so the client can fail
+		// over instead of declaring a reachable store silent.
+		pc.OpenSearchURLs = base.EffectiveURLs()
 	}
 	if pc.OpenSearchUser == "" {
 		pc.OpenSearchUser = os.Getenv("OPENSEARCH_USER")
 	}
 	pc.OpenSearchURL = target
-	pc.OpenSearchURLs = nil
 	pc.OpenSearchPassword = pw
 	c, err := client.NewClient(pc)
 	if err != nil {
@@ -237,7 +250,8 @@ func reportClusterName(out, errOut io.Writer, cfg *config.Config, cluster string
 		}
 		return
 	}
-	if err := config.SetConfigValue(path, "opensearch_cluster", cluster); err != nil {
+	prev, err := config.SetConfigValue(path, "opensearch_cluster", cluster)
+	if err != nil {
 		if _, werr := fmt.Fprintf(errOut, "warning: could not record opensearch_cluster in %s (%v): "+
 			"add \"opensearch_cluster\": \"%s\" by hand or export OPENSEARCH_CLUSTER\n", path, err, cluster); werr != nil {
 			fatalErr(werr)
@@ -246,6 +260,14 @@ func reportClusterName(out, errOut io.Writer, cfg *config.Config, cluster string
 	}
 	if err := writeLine(out, "config: opensearch_cluster="+cluster+" recorded in "+path); err != nil {
 		fatalErr(err)
+	}
+	if prev != "" && prev != cluster {
+		// The store this config pointed at before keeps its keyring entry:
+		// nothing reads it any more, and silence would leak a secret slot.
+		if err := writeLine(out, "note: the config previously named "+prev+": its keyring entry (account "+
+			config.ClusterAccount(prev)+") stays until removed with 'velruna creds rm --name "+prev+"'"); err != nil {
+			fatalErr(err)
+		}
 	}
 }
 
@@ -283,10 +305,8 @@ func credsStatusCmd() *cobra.Command {
 // try them, and reports the outcome per entry (never the value).
 func probeAccounts(cfg *config.Config, target string) []accountProbe {
 	var probes []accountProbe
-	if cfg != nil {
-		if name := strings.TrimSpace(cfg.OpenSearchCluster); name != "" {
-			probes = append(probes, accountProbe{account: config.ClusterAccount(name), kind: "cluster"})
-		}
+	if name := recordedClusterName(cfg); name != "" {
+		probes = append(probes, accountProbe{account: config.ClusterAccount(name), kind: "cluster"})
 	}
 	probes = append(probes, accountProbe{account: accountFor(target), kind: "legacy"})
 	for i := range probes {
@@ -336,28 +356,23 @@ func renderCredsStatus(cfg *config.Config, probes []accountProbe, backend string
 		b.WriteString(backend)
 	}
 	b.WriteString("\nkeyring: ")
+	outage := probeOutage(probes)
 	switch {
-	case len(probes) == 0:
-		b.WriteString("nothing to probe\n")
-	default:
-		outage := probeOutage(probes)
-		switch {
-		case outage != nil:
-			b.WriteString("unavailable: ")
-			b.WriteString(outage.Error())
-			// An ErrBackend text already names its own fix (env var, ksecretd,
-			// KWallet-native); adding the container hint would contradict it on
-			// a desktop that simply has the wrong provider.
-			if !errors.Is(outage, keyring.ErrBackend) {
-				b.WriteString("\n  (no session bus in containers/ssh: use OPENSEARCH_PASSWORD)")
-			}
-		case probesAllMissing(probes):
-			b.WriteString("no entry — store one: velruna creds set")
-		default:
-			b.WriteString("entry present (value not shown)")
+	case outage != nil:
+		b.WriteString("unavailable: ")
+		b.WriteString(outage.Error())
+		// An ErrBackend text already names its own fix (env var, ksecretd,
+		// KWallet-native); adding the container hint would contradict it on
+		// a desktop that simply has the wrong provider.
+		if !errors.Is(outage, keyring.ErrBackend) {
+			b.WriteString("\n  (no session bus in containers/ssh: use OPENSEARCH_PASSWORD)")
 		}
-		b.WriteString("\n")
+	case probesAllMissing(probes):
+		b.WriteString("no entry — store one: velruna creds set")
+	default:
+		b.WriteString("entry present (value not shown)")
 	}
+	b.WriteString("\n")
 	if cfg != nil {
 		b.WriteString("config file plaintext: ")
 		switch {
@@ -415,13 +430,17 @@ func probesAllMissing(probes []accountProbe) bool {
 
 func credsRmCmd() *cobra.Command {
 	var legacy bool
+	var name string
 	rm := &cobra.Command{
 		Use:   "rm",
 		Short: "Remove the keyring entry for the OpenSearch store",
 		Long: `Removes the entry the current configuration resolves to: the cluster
 account when opensearch_cluster names the store, otherwise the legacy
 host[:port] one. --legacy also removes the legacy host[:port] entry left behind
-by the migration to cluster naming.`,
+by the migration to cluster naming. --name removes the entry for one explicit
+store label (cluster/<name>) — the only way to clean up entries created with
+'velruna creds set --name' against a store the current config no longer points
+at.`,
 		Args: cobra.NoArgs,
 		Run: func(cmd *cobra.Command, args []string) {
 			out := cmd.OutOrStdout()
@@ -430,10 +449,10 @@ by the migration to cluster naming.`,
 				fatalErr(err)
 			}
 			var accounts []string
-			if cfg != nil {
-				if name := strings.TrimSpace(cfg.OpenSearchCluster); name != "" {
-					accounts = append(accounts, config.ClusterAccount(name))
-				}
+			if explicit := strings.TrimSpace(name); explicit != "" {
+				accounts = append(accounts, config.ClusterAccount(explicit))
+			} else if recorded := recordedClusterName(cfg); recorded != "" {
+				accounts = append(accounts, config.ClusterAccount(recorded))
 			}
 			if len(accounts) == 0 || legacy {
 				accounts = append(accounts, accountFor(target))
@@ -457,6 +476,8 @@ by the migration to cluster naming.`,
 	}
 	rm.Flags().BoolVar(&legacy, "legacy", false,
 		"also remove the legacy host[:port] entry")
+	rm.Flags().StringVar(&name, "name", "",
+		"remove the entry for this explicit store label (cluster/<name>) instead of the configured one")
 	return rm
 }
 
