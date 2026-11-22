@@ -370,7 +370,9 @@ The field is a chain, not a graph, and the invariants make it walkable:
   itself be retired or merged again, so the chain must stay repairable), and
   every repoint is its own `op=supersede` entry;
 - no self-reference and no cycles — the client walks the target's own chain
-  (bounded) before accepting a link;
+  (bounded) before accepting a link; a single process serializes link writes,
+  so two concurrent patches cannot both pass that walk. Two processes can
+  still race, and the result is a cycle a later repoint repairs;
 - every fact on the chain must be `verified` **at the time the link is
   written**: a reader sent through an obsolete hop would land on a record the
   store itself says is dead. A target retired later is visible in one `get`

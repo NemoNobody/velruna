@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/NemoNobody/velruna/internal/model"
@@ -142,6 +143,9 @@ func ValidatePatchFields(p PatchFields) error {
 // failed to recognize or a store corrupted by hand.
 const maxSupersedeChain = 100
 
+// supersedeLinkMu serializes link writes within this process (see Patch).
+var supersedeLinkMu sync.Mutex
+
 // checkSupersedeTarget validates a proposed superseded_by link and reports
 // whether it points back in time (the target was created before the linking
 // fact — allowed, but journaled with a marker).
@@ -212,6 +216,16 @@ func (c *Client) checkSupersedeTarget(ctx context.Context, fact *model.Fact, tar
 func (c *Client) Patch(ctx context.Context, key string, p PatchFields) (PatchResult, error) {
 	if err := ValidatePatchFields(p); err != nil {
 		return PatchResult{}, err
+	}
+	if p.SupersededBy != "" {
+		// Cycle detection reads other documents and then writes this one; two
+		// concurrent links (A→B and B→A) could each pass the check before the
+		// other landed. A process-wide lock closes the common case — one MCP
+		// server handling tool calls in parallel. Two processes can still race,
+		// and the result is a cycle a later repoint repairs (the store never
+		// hangs: readers follow one hop and see superseded_by).
+		supersedeLinkMu.Lock()
+		defer supersedeLinkMu.Unlock()
 	}
 
 	existing, seqNo, primaryTerm, err := c.getFactVersion(ctx, key)
