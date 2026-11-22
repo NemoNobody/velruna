@@ -49,7 +49,7 @@ jobs:
             CGO_ENABLED=0 GOOS="$os" GOARCH="$arch" \
               go build -trimpath -ldflags "$LDFLAGS" -o "$out" .
           done
-          (cd dist && sha256sum * > checksums.txt)
+          ( cd dist && ls -A | grep -vx checksums.txt | xargs -r sha256sum > ../checksums.txt && mv ../checksums.txt checksums.txt )
       # One .mcpb bundle carries every build: a client that speaks the format
       # installs the server from a single file with a config dialog, and the
       # official registry points at this artifact.
@@ -69,8 +69,10 @@ jobs:
             scripts/build-mcpb.sh "$semver" dist "dist/velruna-$semver-$pl.mcpb" "$pl"
           done
           # Regenerate: the bundles are release assets too, and checksums.txt is
-          # the file users verify against.
-          (cd dist && sha256sum * > checksums.txt)
+          # the file users verify against. The list is built first and moved in
+          # afterwards: a plain redirect would truncate the file before the glob
+          # expanded, hashing the empty checksums.txt into itself.
+          ( cd dist && ls -A | grep -vx checksums.txt | xargs -r sha256sum > ../checksums.txt && mv ../checksums.txt checksums.txt )
       - name: Publish
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

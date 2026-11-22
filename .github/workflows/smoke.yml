@@ -131,11 +131,23 @@ jobs:
           }
           JSON
           docker compose -f docker/opensearch.yml --profile secure --profile secure-dash up -d
+          # Wait for the cluster with an authenticated probe: the demo config
+          # answers 401 without credentials, so an unauthenticated wait hangs.
           for _ in $(seq 1 80); do
-            curl -sf -o /dev/null --max-time 3 "http://127.0.0.1:$VELRUNA_DASH_SECURE_PORT/api/status" && break
+            if curl -ksf -u "admin:$VELRUNA_SECURE_DEV_PASSWORD" \
+              "https://127.0.0.1:9443/_cluster/health" >/dev/null; then break; fi
             sleep 3
           done
-          curl -sf -o /dev/null "http://127.0.0.1:$VELRUNA_DASH_SECURE_PORT/api/status"
+          # The UI is up when it answers; with security on an anonymous
+          # /api/status answers 401, which is the expected state (asserted below).
+          up=""
+          for _ in $(seq 1 80); do
+            code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 3 \
+              "http://127.0.0.1:$VELRUNA_DASH_SECURE_PORT/api/status" || true)
+            if [ "$code" = "200" ] || [ "$code" = "401" ]; then up=1; break; fi
+            sleep 3
+          done
+          if [ -z "$up" ]; then echo "secured Dashboards did not answer"; exit 1; fi
           # The point of this job: security is really on. An anonymous call must
           # be rejected, otherwise we would be testing the security-off stack.
           code=$(curl -ks -o /dev/null -w '%{http_code}' "https://127.0.0.1:9443")

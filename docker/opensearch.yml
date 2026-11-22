@@ -97,7 +97,7 @@ services:
   # right for a throwaway node and wrong for a server install. This one talks to
   # the secured node over https, logs in with the admin credentials and skips
   # certificate verification because the node uses the demo certificates.
-  #   UI: https://127.0.0.1:5643  (VELRUNA_DASH_SECURE_PORT to move it)
+  #   UI: http://127.0.0.1:5643  (VELRUNA_DASH_SECURE_PORT to move it)
   #   login: admin / the password passed to make (VELRUNA_SECURE_DEV_PASSWORD)
   dashboards-secure:
     image: ${OSD_IMAGE:-opensearchproject/opensearch-dashboards:3.8.0}
@@ -203,7 +203,7 @@ services:
       # must log in: an unauthenticated curl -f made this node permanently
       # unhealthy the moment anything depended on it. $$ escapes the compose
       # interpolation and leaves $OPENSEARCH_INITIAL_ADMIN_PASSWORD to the shell.
-      test: ["CMD-SHELL", "curl -sk -u admin:$$OPENSEARCH_INITIAL_ADMIN_PASSWORD https://localhost:9200/_cluster/health | grep -q '\"status\"'"]
+      test: ["CMD-SHELL", "curl -sk -u admin:$$OPENSEARCH_INITIAL_ADMIN_PASSWORD https://localhost:9200/_cluster/health | grep -q '\"status\":\"green\"\\|\"status\":\"yellow\"'"]
       interval: 10s
       timeout: 5s
       retries: 60
