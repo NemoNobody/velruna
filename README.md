@@ -192,7 +192,7 @@ The full annotated example (index names, TTLs, fetch options) is
 local node only — verification is on by default.
 
 The index is created automatically on first use. Env vars override the file:
-`OPENSEARCH_URL`, `OPENSEARCH_USER`, `OPENSEARCH_PASSWORD`,
+`OPENSEARCH_URL`, `OPENSEARCH_URLS`, `OPENSEARCH_USER`, `OPENSEARCH_PASSWORD`,
 `OPENSEARCH_INSECURE_SKIP_VERIFY`, `VELRUNA_INDEX`, `VELRUNA_HISTORY_PERIOD`,
 `VELRUNA_HISTORY_LIMIT`, `VELRUNA_SUMMARY_MIN_LEN`, `VELRUNA_SUMMARY_MAX_LEN`,
 `VELRUNA_SECRET_GUARD`, `VELRUNA_ALLOW_PLAINTEXT`,

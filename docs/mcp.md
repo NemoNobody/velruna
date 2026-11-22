@@ -155,6 +155,13 @@ A per-OS bundle declares only its own platform and drops the other launch
 descriptions; the universal one exists because a registry package entry has no
 platform field, so a client cannot choose between several artifacts.
 
+One limitation of the universal bundle: the manifest format has a single
+`entry_point` and no per-platform variant for it, so it names the POSIX
+launcher and the Windows command is selected through
+`mcp_config.platform_overrides` (what MCP Bundle clients execute). A client that
+resolves `entry_point` itself on Windows needs the `-windows` bundle, whose
+manifest points straight at the `.exe`.
+
 The form asks for:
 
 | Field | Goes to |

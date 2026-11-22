@@ -367,8 +367,10 @@ reader who lands on the dead key is sent to the live one.
 The field is a chain, not a graph, and the invariants make it walkable:
 
 - one outgoing link per fact — a later patch may repoint it (a successor can
-  itself be retired or merged again, so the chain must stay repairable), and
-  every repoint is its own `op=supersede` entry;
+  itself be retired or merged again, so the chain must stay repairable): a
+  link-only repoint is its own `op=supersede` entry, while a patch that also
+  changes the value or retires the fact keeps that event's op and states the
+  link in its entry;
 - no self-reference and no cycles — the client walks the target's own chain
   (bounded) before accepting a link; a single process serializes link writes,
   so two concurrent patches cannot both pass that walk. Two processes can
@@ -582,7 +584,7 @@ come from a config file:
 - `velruna.conf` next to the binary
 - `~/.velruna.conf`
 
-Env vars override the file: `OPENSEARCH_URL`, `OPENSEARCH_USER`,
+Env vars override the file: `OPENSEARCH_URL`, `OPENSEARCH_URLS`, `OPENSEARCH_USER`,
 `OPENSEARCH_PASSWORD`, `OPENSEARCH_INSECURE_SKIP_VERIFY`, `VELRUNA_CONF`,
 `VELRUNA_INDEX`, `VELRUNA_HISTORY_PERIOD`, `VELRUNA_HISTORY_LIMIT`,
 `VELRUNA_SECRET_GUARD`,

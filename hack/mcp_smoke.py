@@ -88,7 +88,15 @@ def main() -> int:
     }})
     call = await_msg(20)
     print("tools/call  :", brief(call, 800))
-    if not (call and "result" in call):
+    ok = False
+    if call and "result" in call:
+        result = call["result"]
+        fact = (result.get("structuredContent") or {}).get("fact") or {}
+        # A handler error arrives as a normal result with isError=true (the
+        # Go SDK wraps it), and a missing fact is a successful found=false:
+        # neither may count as a working read.
+        ok = not result.get("isError") and fact.get("found") is True
+    if not ok:
         failures.append("tools/call")
 
     proc.stdin.close()

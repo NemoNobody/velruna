@@ -88,9 +88,12 @@ jobs:
           total=$(curl -sf -H 'osd-xsrf: smoke' "$ui/api/saved_objects/_find?type=visualization&per_page=1" |
             python3 -c 'import json,sys; print(json.load(sys.stdin)["total"])')
           test "$total" -eq 18
-          # 4. no personal tenant index appeared: the push is global, not per-user
-          count=$(curl -sf "$os/_cat/indices/.kibana*?h=index" | wc -l)
-          test "$count" -eq 1
+          # 4. no personal tenant index appeared: the push is global, not per-user.
+          # Count the backing indices of the .kibana alias, not `.kibana*`:
+          # Dashboards also owns .kibana_task_manager_<n>, which is not a tenant.
+          backing=$(curl -sf "$os/_alias/.kibana" |
+            python3 -c 'import json,sys; print(len(json.load(sys.stdin)))')
+          test "$backing" -eq 1
 
       - name: MCP handshake
         run: |
@@ -165,11 +168,12 @@ jobs:
           curl -ksf -u "admin:$VELRUNA_SECURE_DEV_PASSWORD" \
             "https://127.0.0.1:9443/.kibana/_doc/dashboard%3Avelruna-store-dashboard" |
             grep -q '"found":true'
-          # Global, not personal: exactly one saved-objects index exists, so the
-          # push did not create a per-user tenant index.
-          count=$(curl -ksf -u "admin:$VELRUNA_SECURE_DEV_PASSWORD" \
-            "https://127.0.0.1:9443/_cat/indices/.kibana*?h=index" | wc -l)
-          test "$count" -eq 1
+          # Global, not personal: exactly one backing index behind the .kibana
+          # alias (not `.kibana*` — Dashboards' task manager is not a tenant).
+          backing=$(curl -ksf -u "admin:$VELRUNA_SECURE_DEV_PASSWORD" \
+            "https://127.0.0.1:9443/_alias/.kibana" |
+            python3 -c 'import json,sys; print(len(json.load(sys.stdin)))')
+          test "$backing" -eq 1
           # The UI really requires a login.
           code=$(curl -s -o /dev/null -w '%{http_code}' \
             "http://127.0.0.1:$VELRUNA_DASH_SECURE_PORT/api/status")

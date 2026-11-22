@@ -74,7 +74,7 @@ OpenSearch Dashboards has started at least once against the cluster.`,
 			// objects are already written, and the operator needs the counts to
 			// know that a retry is safe rather than duplicated.
 			if res != nil {
-				if werr := printDashboardPush(os.Stdout, os.Stderr, res, cfg.OpenSearchURL, err); werr != nil {
+				if werr := printDashboardPush(os.Stdout, os.Stderr, res, cfg.EffectiveURLs()[0], err); werr != nil {
 					fatalErr(werr)
 				}
 			}
