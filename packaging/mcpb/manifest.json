@@ -40,7 +40,10 @@
       },
       "platform_overrides": {
         "win32": {
-          "command": "${__dirname}/server/velruna-windows-amd64.exe"
+          "command": "${__dirname}/server/velruna-windows-amd64.exe",
+          "args": [
+            "mcp"
+          ]
         }
       }
     }
