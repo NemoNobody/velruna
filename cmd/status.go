@@ -101,6 +101,9 @@ type statusReport struct {
 	OpenSearchVersion  string               `json:"opensearch_version,omitempty" jsonschema:"OpenSearch version, when reachable"`
 	Storage            *client.StorageState `json:"storage,omitempty" jsonschema:"cluster health, disk usage and read-only state; absent when the store is unreachable"`
 	StorageNote        string               `json:"storage_note,omitempty" jsonschema:"what the health status means for this index, in words"`
+	Schema             string               `json:"schema,omitempty" jsonschema:"facts-index schema marker: v1 | vN | unversioned (pre-marker store) | newer (vN) | absent | unreadable (why); this binary writes v1"`
+	Mapping            string               `json:"mapping,omitempty" jsonschema:"stored field types compared with what this binary writes: ok, \"not yet mapped: ...\", or the drift (\"field: stored, want ...\"); empty when the mapping could not be read"`
+	SchemaHint         string               `json:"schema_hint,omitempty" jsonschema:"what to do about the schema/mapping verdict (re-index recipe, role permission, binary upgrade)"`
 	Fetch              *fetchReport         `json:"fetch,omitempty" jsonschema:"document-fetch configuration: TTL, renderer, proxy presence (never the URL), allowlist size — the \"why does fetch fail\" answer"`
 	Error              string               `json:"error,omitempty" jsonschema:"why the store is not usable"`
 	Hint               string               `json:"hint,omitempty" jsonschema:"what the user should do about it"`
@@ -282,6 +285,10 @@ func collectStatus(ctx context.Context, confPath string, noCWD bool) statusRepor
 	rep.OpenSearchVersion = info.Version.Number
 	rep.Storage = c.StorageState(ctx)
 	rep.StorageNote = storageNote(rep.Storage)
+	// The store's own mapping is the only truth about the schema: what this
+	// binary was built to write is not evidence that the index agrees.
+	sc := c.SchemaCheck(ctx)
+	rep.Schema, rep.Mapping, rep.SchemaHint = sc.Schema, sc.Mapping, sc.Hint
 	// With a live client the security probe can resolve the store user: the
 	// effective author is the client's chain answer, not the config guess.
 	labels := c.AuthorLabels(ctx)
@@ -474,6 +481,9 @@ func printStatus(w io.Writer, rep statusReport) error {
 		if err := printStorage(w, rep); err != nil {
 			return err
 		}
+		if err := printSchema(w, rep); err != nil {
+			return err
+		}
 		return writeLine(w, "status: OK")
 	}
 	b.WriteString("status: NOT AVAILABLE\n  error: ")
@@ -481,6 +491,30 @@ func printStatus(w io.Writer, rep statusReport) error {
 	b.WriteString("\n  hint: ")
 	b.WriteString(rep.Hint)
 	b.WriteString("\n")
+	_, err := io.WriteString(w, b.String())
+	return err
+}
+
+// printSchema renders the schema/mapping verdict. A clean store prints one
+// short line; a drifted one says what drifted and where the fix recipe is,
+// because the drift silently degrades exact filters until someone re-indexes.
+func printSchema(w io.Writer, rep statusReport) error {
+	if rep.Schema == "" {
+		return nil
+	}
+	var b strings.Builder
+	b.WriteString("schema: ")
+	b.WriteString(rep.Schema)
+	if rep.Mapping != "" {
+		b.WriteString("  mapping: ")
+		b.WriteString(rep.Mapping)
+	}
+	b.WriteString("\n")
+	if rep.SchemaHint != "" && rep.Mapping != "ok" {
+		b.WriteString("  hint: ")
+		b.WriteString(rep.SchemaHint)
+		b.WriteString("\n")
+	}
 	_, err := io.WriteString(w, b.String())
 	return err
 }

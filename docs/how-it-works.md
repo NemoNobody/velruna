@@ -333,6 +333,62 @@ keywords are a stored qualifier, not a journaled observation. Every accepted
 value's journal entry carries the tag set as of that moment, so re-tagging is
 safe: the previous set stays recoverable from the entry that carried it.
 
+## Schema version and field-type drift
+
+The facts index carries a schema marker in `mappings._meta.velruna_schema`. A
+store stamped with a **lower** version is upgraded in place (every change so far
+is additive: new fields, new views), and a store stamped with a **higher** one
+is refused by name — a newer binary may rely on fields this one does not know,
+and "keep writing and hope" is how a store gets corrupted. A store created
+before markers (0.8.x) is adopted at the current version.
+
+`velruna status` (and the `velruna_status` tool) prints the verdict in words:
+
+```
+schema: v1  mapping: ok
+```
+
+The mapping half compares the **stored** field types with what this binary
+writes. A type cannot be changed in place, so a field that a dynamic mapping
+pinned before the mapping was made explicit (the classic case: a `keywords`
+array written to a 0.8 index before `keywords` was declared `keyword`, which
+OpenSearch typed as `text` + a `.keyword` subfield) keeps that shape forever.
+The symptom is subtle: exact filters on that field can miss values (`keyword:
+"perf"` not matching a value the analyzer split), while reads and writes keep
+working. The generator's additive `_mapping` update cannot repair it — a
+conflicting existing type is rejected — so `status` names the drifted fields
+instead of hiding them.
+
+### Re-indexing a drifted store
+
+Field types are immutable, so the fix is a fresh index. Take a snapshot first
+([docs/backup.md](backup.md)) — a wrong `_reindex` loses the store:
+
+```bash
+# 1. Create the target index with the current mapping: one write under a new
+#    name (a copy of the config with index_name set to velruna_new).
+cp velruna.conf /tmp/reindex.conf && sed -i 's/"index_name": *"velruna"/"index_name": "velruna_new"/' /tmp/reindex.conf
+VELRUNA_CONF=/tmp/reindex.conf velruna add reindex:seed "placeholder" context_map -p velruna
+
+# 2. Copy the documents (the placeholder can be removed afterwards).
+curl -u "$OS_USER" -H 'Content-Type: application/json' -X POST \
+  http://localhost:9200/_reindex \
+  -d '{"source":{"index":"velruna"},"dest":{"index":"velruna_new"}}'
+
+# 3. Point the config at the new index, then drop the old one once reads agree.
+#    (An alias works too, if you prefer the name to stay velruna.)
+sed -i 's/"index_name": *"velruna"/"index_name": "velruna_new"/' velruna.conf
+velruna status            # schema: v1  mapping: ok
+velruna list | wc -l
+curl -u "$OS_USER" -X DELETE http://localhost:9200/velruna
+```
+
+Journal indices (`velruna-history-*`) keep their own templates and are not
+touched by this; they are recreated from the template on the next write. If the
+store role cannot create indices, an administrator has to run these requests —
+that is the same permission boundary `status` reports when it prints
+`schema: unreadable (HTTP 403)`.
+
 ## Re-verification (`confirmed_by`)
 
 `stale` is an instruction to re-check, and a re-check has to leave a trace.

@@ -457,6 +457,7 @@ password: keyring
 cluster: opensearch (OpenSearch 3.8.0)
 storage: cluster=green index=green unassigned_shards=0 data_nodes=1
 disk: busiest data node node-1 at 15% used
+schema: v1  mapping: ok
 status: OK
 ```
 
@@ -467,6 +468,11 @@ legacy host); the value is never printed. `store name:` lists
 plus every candidate entry and the keyring state. `author:` is the label
 stamped on new writes and which chain link produced it (`security` /
 `config` / `os`); it is absent when nothing resolves.
+
+`schema:` is the store's own schema marker and `mapping:` compares the stored
+field types with what this binary writes (`ok`, `not yet mapped: …`, or the
+drift). Field types cannot be changed in place, so a drifted store is fixed by
+a re-index — the recipe is in [docs/how-it-works.md](how-it-works.md).
 
 If OpenSearch is unreachable, `status` prints `NOT AVAILABLE` with the reason and
 a hint, and exits non-zero. If any environment variable is overriding the file,

@@ -80,6 +80,31 @@ func buildIndexProperties() map[string]interface{} {
 	}
 }
 
+// expectedFieldTypes renders buildIndexProperties as name → type label, the
+// shape the schema check compares stored mappings against. A disabled object
+// has no "type" in the store's response, so it gets its own label.
+func expectedFieldTypes() map[string]string {
+	props := buildIndexProperties()
+	out := make(map[string]string, len(props))
+	for name, v := range props {
+		m, ok := v.(map[string]interface{})
+		if !ok {
+			out[name] = "?"
+			continue
+		}
+		if enabled, ok := m["enabled"]; ok && enabled == false {
+			out[name] = "object(disabled)"
+			continue
+		}
+		if t, ok := m["type"].(string); ok {
+			out[name] = t
+			continue
+		}
+		out[name] = "?"
+	}
+	return out
+}
+
 // EnsureIndex creates the index when it is missing.
 //
 // Existence is checked with a read-only request first, and the create is skipped
