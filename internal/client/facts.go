@@ -95,14 +95,14 @@ func redactionsForFields(rows []model.Redaction, fields ...string) []model.Redac
 // move — observed_at must not, the observation is old and only the qualifier
 // is new, and the journal is untouched; the exception is a dead fact: an
 // unchanged re-add of an obsolete fact is a fresh verification, journaled
-// like the Patch resurrect, and observed_at moves); the value changed (a
-// journal entry is appended for the new value, then the main doc is
-// corrected to point at it — this also resurrects an obsolete fact).
+// like the Patch resurrect, and observed_at moves); the value changed (the
+// doc is corrected with a preallocated current_ref, then the journal entry
+// is appended under it — this also resurrects an obsolete fact).
 //
 // The main write precedes the journal append (doc-first): a failed main
 // write means nothing was accepted and the answer can say so truthfully;
 // a failed append leaves the accepted value in the doc with current_ref
-// dangling until the next correction journals it.
+// dangling until the next journaled write repoints it.
 //
 // Notes are only replaced by a non-empty new note: the CLI flag and the MCP
 // field default to empty, and a correction without --notes must not silently
@@ -325,7 +325,9 @@ func (c *Client) Add(ctx context.Context, f *model.Fact) (AddResult, error) {
 		}
 		if entry != nil {
 			if _, jErr := c.appendJournalID(ctx, entry, ref, "", false); jErr != nil {
-				return AddResult{Changed: true}, fmt.Errorf("add: resurrection accepted, the journal entry lagged: %w", jErr)
+				// The resurrect itself landed (the doc is verified again): the
+				// answer must say so even though the journal entry lagged.
+				return AddResult{Changed: true, Resurrected: true}, fmt.Errorf("add: resurrection accepted, the journal entry lagged: %w", jErr)
 			}
 		}
 		// Same value: notes/source moved, observed_at must not (the
@@ -425,7 +427,7 @@ func (c *Client) Add(ctx context.Context, f *model.Fact) (AddResult, error) {
 		return AddResult{}, wrapWriteError("add fact", err)
 	}
 	if _, jErr := c.appendJournalID(ctx, entry, ref, "", false); jErr != nil {
-		return AddResult{Changed: true, PreviousSummary: existing.Summary}, fmt.Errorf("add: correction accepted, the journal entry lagged: %w", jErr)
+		return AddResult{Changed: true, PreviousSummary: existing.Summary, Resurrected: existing.Status == "obsolete"}, fmt.Errorf("add: correction accepted, the journal entry lagged: %w", jErr)
 	}
 	// The value was accepted as a new version (journal entry + correction):
 	// changed=true, and the summary the correction is replacing is reported
