@@ -91,13 +91,34 @@ def main() -> int:
     ok = False
     if call and "result" in call:
         result = call["result"]
-        fact = (result.get("structuredContent") or {}).get("fact") or {}
-        # A handler error arrives as a normal result with isError=true (the
-        # Go SDK wraps it), and a missing fact is a successful found=false:
-        # neither may count as a working read.
-        ok = not result.get("isError") and fact.get("found") is True
+        # `found` is a TOP-LEVEL field of velruna_get's output; the fact view
+        # has no such field. A handler error arrives as a normal result with
+        # isError=true, and a missing fact is found=false: neither may pass.
+        ok = not result.get("isError") and (result.get("structuredContent") or {}).get("found") is True
     if not ok:
         failures.append("tools/call")
+
+    # 0.9 headline: a successor link round-trips through patch, get and the
+    # journal. The workflow creates demo:api:new next to the key under test.
+    send({"jsonrpc": "2.0", "id": 4, "method": "tools/call", "params": {
+        "name": "velruna_patch",
+        "arguments": {"key": KEY, "superseded_by": "demo:api:new"},
+    }})
+    patched = await_msg(20)
+    print("patch link  :", brief(patched, 400))
+    if not (patched and "result" in patched and not patched["result"].get("isError")):
+        failures.append("patch superseded_by")
+    else:
+        send({"jsonrpc": "2.0", "id": 5, "method": "tools/call", "params": {
+            "name": "velruna_get", "arguments": {"key": KEY},
+        }})
+        again = await_msg(20)
+        fact = {}
+        if again and "result" in again:
+            fact = (again["result"].get("structuredContent") or {}).get("fact") or {}
+        print("link read   :", fact.get("superseded_by"))
+        if fact.get("superseded_by") != "demo:api:new":
+            failures.append("superseded_by roundtrip")
 
     proc.stdin.close()
     try:

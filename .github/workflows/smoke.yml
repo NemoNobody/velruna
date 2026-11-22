@@ -95,10 +95,20 @@ jobs:
             python3 -c 'import json,sys; print(len(json.load(sys.stdin)))')
           test "$backing" -eq 1
 
+      - name: Schema marker
+        run: |
+          set -euo pipefail
+          # 0.9 stamps the mapping contract: a store written by a newer binary
+          # is refused, an older one is upgraded in place.
+          curl -sf "http://127.0.0.1:$VELRUNA_OS_PORT/velruna/_mapping" |
+            python3 -c 'import json,sys; print(json.load(sys.stdin)["velruna"]["mappings"]["_meta"]["velruna_schema"])' |
+            grep -qx 1
+
       - name: MCP handshake
         run: |
           set -euo pipefail
           VELRUNA_CONF="$PWD/ci.conf" ./velruna add demo:api:port 8080 config
+          VELRUNA_CONF="$PWD/ci.conf" ./velruna add demo:api:new 8081 config
           VELRUNA_CONF="$PWD/ci.conf" python3 hack/mcp_smoke.py
 
       - name: Tear down
