@@ -348,11 +348,17 @@ func TestProbeClusterUUIDFailsOverAcrossNodes(t *testing.T) {
 	}
 }
 
-// A node that accepts the connection and then never answers must not make
-// the whole store look silent: the probe's attempts are per-node and timed
-// out attempts are safe to retry (Info is read-only), so a later live node
-// still gets its turn inside the scaled budget.
-func TestProbeClusterUUIDFailsOverPastSilentNode(t *testing.T) {
+// A node that accepts the connection and then never answers must be bounded
+// per attempt and rotated away by the retry (Info is read-only, so a
+// timed-out attempt is safe to retry). The pool starts at a random node, so
+// the other node answers 502 — a retryable status — which makes the round
+// visit BOTH nodes whatever the starting point is: either attempt 1 hangs
+// and the retry lands on the 502 node, or attempt 1 gets the 502 and the
+// retry hangs. The probe must then fail — no node answers usefully — inside
+// the per-attempt bound, having genuinely attempted the silent node. With
+// no per-attempt bound the hanging node would instead burn the whole scaled
+// budget and trip the elapsed check.
+func TestProbeClusterUUIDRetriesPastHangingNode(t *testing.T) {
 	var silentHits atomic.Int32
 	silent := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		silentHits.Add(1)
@@ -363,37 +369,27 @@ func TestProbeClusterUUIDFailsOverPastSilentNode(t *testing.T) {
 		}
 	}))
 	defer silent.Close()
-	live := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"cluster_name":"x","cluster_uuid":"uuid-live"}`))
+	flaky := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, `{"error":"temporary"}`, http.StatusBadGateway)
 	}))
-	defer live.Close()
+	defer flaky.Close()
 
 	base := config.DefaultConfig()
-	base.OpenSearchURLs = []string{silent.URL, live.URL}
-	// The transport may start from either node; repeat until the silent
-	// one actually gets an attempt, so the retry-past-a-hanging-node path
-	// is genuinely exercised rather than skipped by pool luck.
-	var elapsed time.Duration
-	for attempt := 0; attempt < 3; attempt++ {
-		start := time.Now()
-		uuid, err := probeClusterUUID(base.EffectiveURLs()[0], base, "pw")
-		elapsed = time.Since(start)
-		if err != nil {
-			t.Fatalf("the probe must retry past the silent node: %v", err)
-		}
-		if uuid != "uuid-live" {
-			t.Errorf("probed uuid = %q", uuid)
-		}
-		if silentHits.Load() > 0 {
-			break
-		}
+	base.OpenSearchURLs = []string{silent.URL, flaky.URL}
+	start := time.Now()
+	_, err := probeClusterUUID(base.EffectiveURLs()[0], base, "pw")
+	elapsed := time.Since(start)
+	if err == nil {
+		t.Fatal("no node answers usefully: the probe must fail")
+	}
+	if probeRejectedPassword(err) {
+		t.Errorf("a hanging node plus a 502 must not read as a rejected password: %v", err)
 	}
 	if silentHits.Load() == 0 {
-		t.Fatal("the pool never routed an attempt to the silent node")
+		t.Fatal("the retry never routed an attempt to the silent node")
 	}
-	if elapsed > 18*time.Second {
-		t.Errorf("the probe waited %v, want the bounded per-attempt timeout (~10s)", elapsed)
+	if elapsed > 15*time.Second {
+		t.Errorf("the probe waited %v, want the ~10s per-attempt bound, not the whole scaled budget", elapsed)
 	}
 }
 

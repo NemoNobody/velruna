@@ -157,10 +157,16 @@ that user.`,
 						// Storing it — especially over the named entry the runtime
 						// reads first — would swap a working credential for one
 						// the runtime cannot use, and "stored:" would be a lie.
+						// --url bypasses the config, so pointing at opensearch_user
+						// there would name a knob that cannot take effect.
+						knobs := "set OPENSEARCH_USER or opensearch_user if the store uses another"
+						if cfg == nil {
+							knobs = "under --url the config is bypassed: only OPENSEARCH_USER applies"
+						}
 						fatalErr(fmt.Errorf("the store at %s rejected the new password (HTTP 401): nothing stored — "+
 							"the runtime authenticates the same way; re-run with the right password "+
-							"(the probe authenticated as user %q — set OPENSEARCH_USER or opensearch_user if the store uses another)",
-							config.RedactURL(target), probeUser(cfg)))
+							"(the probe authenticated as user %q — %s)",
+							config.RedactURL(target), probeUser(cfg), knobs))
 					}
 					if recorded := recordedClusterName(cfg); recorded != "" {
 						// The config already names this store (a previous
@@ -253,15 +259,14 @@ func probeClusterUUID(target string, base *config.Config, pw string) (string, er
 	// — cannot eat the probe before a live node gets its turn. The probe
 	// client is read-only (Info only), so unlike the runtime client a
 	// timed-out attempt is safe to retry on the next node.
-	budget, attempt := 15*time.Second, 15*time.Second
-	if n := len(addresses); n > 1 {
-		budget = time.Duration(n) * 10 * time.Second
-		if budget > 90*time.Second {
-			budget = 90 * time.Second
-		}
-		if attempt = budget / time.Duration(n); attempt < 5*time.Second {
-			attempt = 5 * time.Second
-		}
+	n := len(addresses)
+	budget := time.Duration(n) * 10 * time.Second
+	if budget > 90*time.Second {
+		budget = 90 * time.Second
+	}
+	attempt := budget / time.Duration(n)
+	if attempt < 5*time.Second {
+		attempt = 5 * time.Second
 	}
 	api, err := opensearchapi.NewClient(opensearchapi.Config{
 		Client: opensearch.Config{
@@ -273,7 +278,7 @@ func probeClusterUUID(target string, base *config.Config, pw string) (string, er
 			// still applies its default retries after transient faults —
 			// safe here because Info is read-only, and the scaled deadline
 			// bounds the whole probe either way.
-			MaxRetries:           len(addresses) - 1,
+			MaxRetries:           n - 1,
 			EnableRetryOnTimeout: true,
 			RequestTimeout:       attempt,
 		},
