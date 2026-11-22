@@ -146,11 +146,13 @@ jobs:
           docker compose -f docker/opensearch.yml --profile secure --profile secure-dash up -d
           # Wait for the cluster with an authenticated probe: the demo config
           # answers 401 without credentials, so an unauthenticated wait hangs.
+          cluster_up=""
           for _ in $(seq 1 80); do
-            if curl -ksf -u "admin:$VELRUNA_SECURE_DEV_PASSWORD" \
-              "https://127.0.0.1:9443/_cluster/health" >/dev/null; then break; fi
+            if curl -ksf --max-time 3 -u "admin:$VELRUNA_SECURE_DEV_PASSWORD" \
+              "https://127.0.0.1:9443/_cluster/health" >/dev/null; then cluster_up=1; break; fi
             sleep 3
           done
+          if [ -z "$cluster_up" ]; then echo "secured cluster did not answer"; exit 1; fi
           # The UI is up when it answers; with security on an anonymous
           # /api/status answers 401, which is the expected state (asserted below).
           up=""

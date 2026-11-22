@@ -184,6 +184,33 @@ func TestReconcileMappingClusterBlockKeepsGateOpen(t *testing.T) {
 	}
 }
 
+// TestReconcileMapping400IsFinal: the cluster rejected the mapping outright
+// (an alias with several backing indices, a conflicting field type). Retrying
+// pays a refused PUT per tool call and never succeeds.
+func TestReconcileMapping400IsFinal(t *testing.T) {
+	c, fake := newFakeClientCfg(t, func(cfg *config.Config) {
+		cfg.IndexReplicas = 0
+	}, func(r recordedRequest) (int, string) {
+		switch {
+		case r.Method == http.MethodHead && r.Path == "/velruna":
+			return http.StatusOK, ""
+		case r.Method == http.MethodGet && r.Path == "/velruna/_mapping":
+			return http.StatusOK, `{}`
+		case r.Method == http.MethodPut && r.Path == "/velruna/_mapping":
+			return http.StatusBadRequest, `{"error":{"type":"illegal_argument_exception","reason":"mapping update on an alias"},"status":400}`
+		}
+		return http.StatusOK, `{}`
+	})
+	for i := 0; i < 2; i++ {
+		if err := c.EnsureIndex(context.Background()); err != nil {
+			t.Fatalf("EnsureIndex #%d: %v", i, err)
+		}
+	}
+	if got := len(fake.requestsFor(http.MethodPut, "/velruna/_mapping")); got != 1 {
+		t.Fatalf("mapping puts = %d, want 1 (400 is final: externally managed)", got)
+	}
+}
+
 // TestReconcileMappingWaitsForTheFirstPass mirrors the journal-infra wait test:
 // a second caller must not proceed while the first PUT is in flight, or a write
 // could race the additive mapping and pin a field dynamically.

@@ -55,6 +55,14 @@ func (c *Client) reconcileMapping(ctx context.Context) error {
 			gate.done = true
 			return nil
 		}
+		if statusIs(err, 400) {
+			// The cluster rejected the mapping outright (index_name is an alias
+			// with several backing indices, or a field already has an
+			// incompatible type). Nothing about retrying changes that: the
+			// upgrade is externally managed from here on.
+			gate.done = true
+			return nil
+		}
 		// The gate stays open: the next caller retries.
 		return fmt.Errorf("reconcile index mapping %s: %w", c.cfg.IndexName, err)
 	}
