@@ -67,12 +67,14 @@ var metaFields = []Field{
 
 // MappingField is one property in an index mapping: either a leaf (with a
 // "type"), an object (with nested "properties"), a deliberately disabled
-// object ("enabled": false — not a field, and not a missing type), or a leaf
-// with multi-fields (with "fields"). Exported so the store layer can decode
-// mappings into it.
+// object ("enabled": false — not a field, and not a missing type), a leaf
+// excluded from the index ("index": false — present but unsearchable), or a
+// leaf with multi-fields (with "fields"). Exported so the store layer can
+// decode mappings into it.
 type MappingField struct {
 	Type       string                  `json:"type"`
 	Enabled    *bool                   `json:"enabled"`
+	Index      *bool                   `json:"index"`
 	Properties map[string]MappingField `json:"properties"`
 	Fields     map[string]MappingField `json:"fields"`
 }
@@ -108,15 +110,17 @@ func flattenFields(props map[string]MappingField, prefix string, skipped map[str
 	for _, name := range names {
 		spec := props[name]
 		path := prefix + name
-		if spec.Enabled != nil && !*spec.Enabled {
-			// A deliberately disabled object: the store chose not to index
+		_, isLeaf := fieldTypes[spec.Type]
+		if spec.Enabled != nil && !*spec.Enabled && !isLeaf {
+			// A deliberately disabled OBJECT: the store chose not to index
 			// anything under it — absence is the design, not a generator
 			// gap. Checked before the container walk: a disabled object can
 			// still carry properties, and baking them would list fields the
-			// store refuses to index.
+			// store refuses to index. Leaf mappers do not parse "enabled"
+			// (the leaf knob is "index"), so a leaf that carries it anyway
+			// is treated as normal rather than dropped in silence.
 			continue
 		}
-		_, isLeaf := fieldTypes[spec.Type]
 		if len(spec.Properties) > 0 && !isLeaf {
 			// A container (typeless object, "object", "nested") is walked
 			// into: OSD lists its leaves, not the container. velruna's own
@@ -127,10 +131,13 @@ func flattenFields(props map[string]MappingField, prefix string, skipped map[str
 		if isLeaf {
 			ft := fieldTypes[spec.Type]
 			out = append(out, Field{
-				Name:              path,
-				Type:              ft.osdType,
-				EsTypes:           []string{spec.Type},
-				Searchable:        true,
+				Name:    path,
+				Type:    ft.osdType,
+				EsTypes: []string{spec.Type},
+				// index:false keeps the value stored but out of the index:
+				// OSD must not present it as searchable or a query on it
+				// silently returns nothing.
+				Searchable:        spec.Index == nil || *spec.Index,
 				Aggregatable:      ft.aggs,
 				ReadFromDocValues: ft.docs,
 			})
@@ -161,7 +168,7 @@ func flattenFields(props map[string]MappingField, prefix string, skipped map[str
 					Name:              path + "." + sub,
 					Type:              ft.osdType,
 					EsTypes:           []string{spec.Fields[sub].Type},
-					Searchable:        true,
+					Searchable:        spec.Fields[sub].Index == nil || *spec.Fields[sub].Index,
 					Aggregatable:      ft.aggs,
 					ReadFromDocValues: ft.docs,
 				})

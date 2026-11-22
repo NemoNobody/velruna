@@ -20,6 +20,7 @@ func TestFieldsFromMappingBakesTheBundleShape(t *testing.T) {
 		"confirmed_by": {"type": "object", "enabled": false},
 		"dead": {"type": "object", "enabled": false, "properties": {"a": {"type": "keyword"}}},
 		"dyn": {"type": "object"},
+		"secret_html": {"type": "text", "index": false},
 		"vector": {"type": "knn_vector"},
 		"floaty": {"type": "float"}
 	}`), &props); err != nil {
@@ -31,9 +32,16 @@ func TestFieldsFromMappingBakesTheBundleShape(t *testing.T) {
 	for _, f := range fields {
 		names = append(names, f.Name)
 	}
-	want := "_index,model.name,nested_obj.deep,observed_at,ttl_days,value,value.keyword"
+	want := "_index,model.name,nested_obj.deep,observed_at,secret_html,ttl_days,value,value.keyword"
 	if got := strings.Join(names, ","); got != want {
 		t.Errorf("field names = %s, want %s", got, want)
+	}
+	// index:false keeps the value stored but out of the index: the field
+	// must appear (it exists) but never as searchable.
+	for _, f := range fields {
+		if f.Name == "secret_html" && f.Searchable {
+			t.Error("index:false field baked as searchable")
+		}
 	}
 	// Types without an OSD equivalent are reported, never dropped in
 	// silence. Not reported: a deliberately disabled object (even one that
@@ -101,8 +109,9 @@ func TestRenderFieldsEscapesHostileNames(t *testing.T) {
 
 func TestRewriteFieldsPreservesBlankLines(t *testing.T) {
 	// The O(1) sawContent fix must not change behavior: leading blank lines
-	// are dropped, interior and trailing ones are kept — the committed
-	// bundle's byte shape, so a re-bake diffs only the lists that changed.
+	// are dropped, interior and trailing ones are kept. The committed bundle
+	// itself has no blank lines, so this pins the generator's blank-line
+	// contract for any future bundle that does.
 	bundle := []byte("\n\n{\"id\": \"p1\", \"type\": \"index-pattern\", \"attributes\": {\"title\": \"velruna\", \"timeFieldName\": \"created_at\", \"fields\": \"[{\\\"name\\\": \\\"old\\\"}]\"}}\n\n{\"id\": \"v1\", \"type\": \"visualization\", \"attributes\": {\"title\": \"Facts\"}}\n\n")
 	newFields := `[{"name": "value", "type": "string", "esTypes": ["text"], "count": 0, "scripted": false, "searchable": true, "aggregatable": false, "readFromDocValues": false}]`
 
