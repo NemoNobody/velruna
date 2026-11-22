@@ -26,7 +26,8 @@ func TestDashboardsGenFieldsBakesAndPreserves(t *testing.T) {
 			}}}}`))
 		case "/velruna-docs/_mapping":
 			_, _ = w.Write([]byte(`{"velruna-docs":{"mappings":{"properties":{
-				"hash": {"type": "keyword"}
+				"hash": {"type": "keyword"},
+				"html": {"type": "text", "index": false}
 			}}}}`))
 		case "/velruna-history-*/_mapping":
 			http.Error(w, `{"error":{"type":"index_not_found_exception"}}`, http.StatusNotFound)
@@ -74,7 +75,7 @@ func TestDashboardsGenFieldsBakesAndPreserves(t *testing.T) {
 	if !strings.Contains(stdout, "velruna: 5 field(s) baked from velruna") {
 		t.Errorf("facts bake line missing:\n%s", stdout)
 	}
-	if !strings.Contains(stdout, "velruna-docs: 2 field(s) baked from velruna-docs") {
+	if !strings.Contains(stdout, "velruna-docs: 3 field(s) baked from velruna-docs") {
 		t.Errorf("docs bake line missing:\n%s", stdout)
 	}
 	if !strings.Contains(errOut.String(), "velruna-history-*: mapping unavailable") {
@@ -111,13 +112,23 @@ func TestDashboardsGenFieldsBakesAndPreserves(t *testing.T) {
 			t.Fatalf("rewritten line does not parse: %v", err)
 		}
 		var fields []struct {
-			Name string `json:"name"`
+			Name       string `json:"name"`
+			Searchable bool   `json:"searchable"`
 		}
 		if err := json.Unmarshal([]byte(obj.Attributes.Fields), &fields); err != nil {
 			t.Fatalf("baked fields string does not parse: %v", err)
 		}
 		if len(fields) == 0 || fields[0].Name != "_index" {
 			t.Errorf("baked list wrong: %s", obj.Attributes.Fields)
+		}
+		// The HTTP path end to end: an index:false leaf arrives through the
+		// raw mapping body and must bake unsearchable.
+		if line == lines[2] {
+			for _, f := range fields {
+				if f.Name == "html" && f.Searchable {
+					t.Errorf("index:false html baked searchable through the generator path: %s", obj.Attributes.Fields)
+				}
+			}
 		}
 	}
 }

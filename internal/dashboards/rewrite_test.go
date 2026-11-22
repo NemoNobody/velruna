@@ -12,7 +12,7 @@ func TestFieldsFromMappingBakesTheBundleShape(t *testing.T) {
 	// keyword subfield, an object to walk into (typed and typeless), scalars,
 	// and a type this generator has no OSD equivalent for.
 	if err := json.Unmarshal([]byte(`{
-		"value": {"type": "text", "fields": {"keyword": {"type": "keyword"}}},
+		"value": {"type": "text", "fields": {"keyword": {"type": "keyword"}, "raw": {"type": "keyword", "index": false}}},
 		"model": {"properties": {"name": {"type": "keyword"}}},
 		"nested_obj": {"type": "object", "properties": {"deep": {"type": "keyword"}}},
 		"observed_at": {"type": "date"},
@@ -32,15 +32,23 @@ func TestFieldsFromMappingBakesTheBundleShape(t *testing.T) {
 	for _, f := range fields {
 		names = append(names, f.Name)
 	}
-	want := "_index,model.name,nested_obj.deep,observed_at,secret_html,ttl_days,value,value.keyword"
+	want := "_index,model.name,nested_obj.deep,observed_at,secret_html,ttl_days,value,value.keyword,value.raw"
 	if got := strings.Join(names, ","); got != want {
 		t.Errorf("field names = %s, want %s", got, want)
 	}
 	// index:false keeps the value stored but out of the index: the field
-	// must appear (it exists) but never as searchable.
+	// must appear (it exists) but never as searchable — for leaves and
+	// for multi-field subfields alike.
 	for _, f := range fields {
-		if f.Name == "secret_html" && f.Searchable {
-			t.Error("index:false field baked as searchable")
+		switch f.Name {
+		case "secret_html", "value.raw":
+			if f.Searchable {
+				t.Errorf("index:false field %s baked as searchable", f.Name)
+			}
+		case "value.keyword":
+			if !f.Searchable {
+				t.Errorf("indexable subfield %s baked as unsearchable", f.Name)
+			}
 		}
 	}
 	// Types without an OSD equivalent are reported, never dropped in
