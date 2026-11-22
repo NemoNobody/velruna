@@ -44,7 +44,7 @@ Bundle invariants (OSD 3.x quirks, all learned live):
 - index-pattern field descriptors use the OSD field-type enum, not the raw
   es type: a saved field of type "keyword" fails Terms aggs ("is invalid
   for use with the Terms aggregation") — keyword/text map to "string",
-  long/integer to "number" (gen_fields.py TYPE_MAP encodes this);
+  long/integer to "number" (`internal/dashboards/fields.go` encodes this);
 - visualization `attributes` must not contain `optionsJSON` (strict
   saved-object mapping rejects it; options live inside `visState`);
 - the dashboard's `panelsJSON` must be a JSON **array** of panel entries
@@ -63,7 +63,8 @@ Bundle invariants (OSD 3.x quirks, all learned live):
   translate it into a malformed ES order path ("failed to parse field
   [order]"); vislib already orders by the metric descending by default;
 - patterns must list the `_index` meta field explicitly (aggregatable
-  "string", esType `_index`) for aggs on it (gen_fields.py META_FIELDS);
+  "string", esType `_index`) for aggs on it (`metaFields` in
+  `internal/dashboards/fields.go`);
 - `visState` aggs live at the TOP level (`{"title","type","params",
   "aggs":[...]}`), not under `params`;
 - the dashboard pins `timeRestore` + `now-90d..now`, otherwise the
@@ -84,6 +85,10 @@ After a mapping change (new fact/journal/doc fields) regenerate the field
 lists from a live cluster, rebuild the binary and push again:
 
 ```
-python3 docker/dashboards/gen_fields.py   # rewrites internal/dashboards/objects.ndjson
+velruna dashboards gen-fields --conf <store.conf>  # rewrites internal/dashboards/objects.ndjson
 make build && ./velruna dashboards push
 ```
+
+The generator rewrites only the `fields` list of the patterns it can read: a
+pattern whose index does not exist keeps its list and is reported, and every
+other byte of the bundle stays where it was.

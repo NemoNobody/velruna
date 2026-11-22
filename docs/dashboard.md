@@ -69,8 +69,8 @@ The push never touches the facts or docs indices, but it needs:
   introspect them over the API). After a mapping change regenerate and push:
 
   ```bash
-  python3 docker/dashboards/gen_fields.py   # rewrites the embedded bundle
-  make build && ./velruna dashboards push   # rebuild: the bundle is embedded
+  velruna dashboards gen-fields --conf <store.conf>   # rewrites the embedded bundle
+  make build && ./velruna dashboards push            # rebuild: the bundle is embedded
   ```
 
 - Journal entries are also readable without Dashboards: `velruna journal
@@ -81,7 +81,7 @@ The push never touches the facts or docs indices, but it needs:
 | Symptom | Cause / fix |
 |---------|-------------|
 | `Trying to initialize aggs without index pattern` | the objects came through `_import` — push with `velruna dashboards push` instead |
-| `Could not locate that index-pattern-field (id: …)` | stale/empty field list in a pattern — re-run `gen_fields.py` + push |
+| `Could not locate that index-pattern-field (id: …)` | stale/empty field list in a pattern — re-run `velruna dashboards gen-fields` + push |
 | Dashboard opens completely empty (no panels) | hand-edited `panelsJSON` in map form — it must be a JSON array (the shipped bundle is correct) |
 | `AnalyticEngineError: does not support DSL queries` | stale SPA cache — hard reload the tab |
 | Dashboard not in the list | you are in another tenant — avatar → Switch tenants → Global |

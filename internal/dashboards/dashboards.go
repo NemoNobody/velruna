@@ -5,8 +5,9 @@
 //
 // The bundle is embedded in the binary on purpose: installing it must work
 // from the single executable, including a distroless container where no
-// python, jq or bundle file is available. The generator that bakes the live
-// field lists stays a development tool (docker/dashboards/gen_fields.py).
+// python, jq or bundle file is available. The field lists are baked by
+// `velruna dashboards gen-fields` (cmd/dashboards.go), a development tool that
+// reads a live store's mappings.
 package dashboards
 
 import (
@@ -19,7 +20,7 @@ import (
 )
 
 // objectsNDJSON is the generator output; keep internal/dashboards/objects.ndjson
-// in sync by re-running docker/dashboards/gen_fields.py after a mapping change.
+// in sync by re-running `velruna dashboards gen-fields` after a mapping change.
 //
 //go:embed objects.ndjson
 var objectsNDJSON []byte
