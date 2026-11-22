@@ -5,6 +5,8 @@
 # name itself, so a tag build is unaffected by this default:
 # make release VERSION=v0.9.0.
 VERSION ?= 0.9.0
+# Bundle artifacts drop the tag's leading v (release.yml does the same).
+MCPB_VERSION ?= $(patsubst v%,%,$(VERSION))
 # Commit stamps the exact tree into the binary (velruna_status reports it).
 # `?=` + shell fallback: local builds get the live HEAD; CI can pass it explicitly.
 COMMIT ?= $(shell git rev-parse --short HEAD 2>/dev/null)
@@ -156,7 +158,7 @@ mcpb:
 	  if [ "$$os" = windows ]; then out=$$out.exe; fi; \
 	  CGO_ENABLED=0 GOOS=$$os GOARCH=$$arch go build -trimpath -ldflags "$(LDFLAGS)" -o $$out .; \
 	done
-	scripts/build-mcpb.sh $(VERSION) $(DIST) $(DIST)/velruna-$(VERSION).mcpb
+	scripts/build-mcpb.sh $(VERSION) $(DIST) $(DIST)/velruna-$(MCPB_VERSION).mcpb
 
 # Secured node + Dashboards with the security plugin ON: the server-shaped
 # recipe (login required, tenant switching real, https). Demo certificates, so
