@@ -139,10 +139,23 @@ mounted config that carries it.
 
 ### Installing from the MCP bundle
 
-Each release also ships `velruna-<version>.mcpb` — the MCP Bundle format: a zip
-holding `manifest.json`, the five platform builds and a launcher. Clients that
-speak the format (Claude Desktop and others) install it from the file and show
-a configuration form instead of asking you to edit JSON:
+Each release also ships MCP Bundles (`.mcpb`) — the MCP Bundle format: a zip
+holding `manifest.json`, the builds and a launcher. Clients that speak the
+format (Claude Desktop and others) install one from the file and show a
+configuration form instead of asking you to edit JSON:
+
+| Asset | Size | Contents |
+|---|---|---|
+| `velruna-<version>.mcpb` | ~22 MB | every build (universal; the registry entry points here) |
+| `velruna-<version>-darwin.mcpb` | ~9 MB | macOS amd64 + arm64 |
+| `velruna-<version>-linux.mcpb` | ~9 MB | linux amd64 + arm64 |
+| `velruna-<version>-windows.mcpb` | ~5 MB | the Windows build |
+
+A per-OS bundle declares only its own platform and drops the other launch
+descriptions; the universal one exists because a registry package entry has no
+platform field, so a client cannot choose between several artifacts.
+
+The form asks for:
 
 | Field | Goes to |
 |---|---|

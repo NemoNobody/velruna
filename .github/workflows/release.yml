@@ -53,15 +53,23 @@ jobs:
       # One .mcpb bundle carries every build: a client that speaks the format
       # installs the server from a single file with a config dialog, and the
       # official registry points at this artifact.
-      - name: Build MCPB bundle
+      - name: Build MCP bundles
         env:
           VERSION: ${{ inputs.version || github.ref_name }}
         run: |
           set -euo pipefail
           semver="${VERSION#v}"
+          # Universal bundle: the one the MCP registry points at (a registry
+          # package entry has no platform field, so clients cannot choose
+          # between several artifacts).
           scripts/build-mcpb.sh "$semver" dist "dist/velruna-$semver.mcpb"
-          # Regenerate: the bundle is a release asset too, and checksums.txt
-          # is the file users verify against.
+          # Per-OS bundles for people who download by hand: same server, a third
+          # of the size.
+          for pl in darwin linux windows; do
+            scripts/build-mcpb.sh "$semver" dist "dist/velruna-$semver-$pl.mcpb" "$pl"
+          done
+          # Regenerate: the bundles are release assets too, and checksums.txt is
+          # the file users verify against.
           (cd dist && sha256sum * > checksums.txt)
       - name: Publish
         env:

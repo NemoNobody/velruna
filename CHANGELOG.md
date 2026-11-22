@@ -10,11 +10,13 @@ notes).
 
 ### Added
 
-- MCP bundle (`.mcpb`): every release now attaches `velruna-<version>.mcpb`, a
-  single file a desktop client can install with a configuration dialog —
+- MCP bundle (`.mcpb`): every release now attaches a universal
+  `velruna-<version>.mcpb` plus per-OS `-darwin`, `-linux` and `-windows`
+  bundles. A desktop client installs one with a configuration dialog —
   OpenSearch URL, user, password and the TLS-skip flag, no JSON editing. The
-  bundle carries all five platform builds plus a launcher that picks the right
-  one. `make mcpb` builds the same artifact locally.
+  universal bundle carries all five builds and a launcher that picks the right
+  one; a per-OS bundle carries only that OS's builds and declares just that
+  platform. `make mcpb` builds the universal one locally.
 
 ## v0.8.10 — 2026-11-21
 
