@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -352,7 +353,9 @@ func TestProbeClusterUUIDFailsOverAcrossNodes(t *testing.T) {
 // out attempts are safe to retry (Info is read-only), so a later live node
 // still gets its turn inside the scaled budget.
 func TestProbeClusterUUIDFailsOverPastSilentNode(t *testing.T) {
+	var silentHits atomic.Int32
 	silent := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		silentHits.Add(1)
 		select {
 		case <-r.Context().Done():
 		case <-time.After(30 * time.Second):
@@ -368,15 +371,28 @@ func TestProbeClusterUUIDFailsOverPastSilentNode(t *testing.T) {
 
 	base := config.DefaultConfig()
 	base.OpenSearchURLs = []string{silent.URL, live.URL}
-	start := time.Now()
-	uuid, err := probeClusterUUID(base.EffectiveURLs()[0], base, "pw")
-	if err != nil {
-		t.Fatalf("the probe must retry past the silent node: %v", err)
+	// The transport may start from either node; repeat until the silent
+	// one actually gets an attempt, so the retry-past-a-hanging-node path
+	// is genuinely exercised rather than skipped by pool luck.
+	var elapsed time.Duration
+	for attempt := 0; attempt < 3; attempt++ {
+		start := time.Now()
+		uuid, err := probeClusterUUID(base.EffectiveURLs()[0], base, "pw")
+		elapsed = time.Since(start)
+		if err != nil {
+			t.Fatalf("the probe must retry past the silent node: %v", err)
+		}
+		if uuid != "uuid-live" {
+			t.Errorf("probed uuid = %q", uuid)
+		}
+		if silentHits.Load() > 0 {
+			break
+		}
 	}
-	if uuid != "uuid-live" {
-		t.Errorf("probed uuid = %q", uuid)
+	if silentHits.Load() == 0 {
+		t.Fatal("the pool never routed an attempt to the silent node")
 	}
-	if elapsed := time.Since(start); elapsed > 18*time.Second {
+	if elapsed > 18*time.Second {
 		t.Errorf("the probe waited %v, want the bounded per-attempt timeout (~10s)", elapsed)
 	}
 }
@@ -489,6 +505,33 @@ func TestProbeRejectedPassword(t *testing.T) {
 		t.Fatal("an unreachable store must fail the probe")
 	} else if probeRejectedPassword(err) {
 		t.Errorf("silence is not a rejection: %v", err)
+	}
+}
+
+// With --url there is no config user context, but the probe must still
+// authenticate (as the runtime's default user): an anonymous request
+// against a secured store would answer 401 and read as "your password is
+// wrong", blocking a perfectly legitimate creds set.
+func TestProbeClusterUUIDAuthenticatesOnURLOverride(t *testing.T) {
+	t.Setenv("OPENSEARCH_USER", "")
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if _, _, ok := r.BasicAuth(); !ok {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusUnauthorized)
+			_, _ = w.Write([]byte(`{"error":{"type":"security_exception","reason":"no credentials"},"status":401}`))
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"cluster_name":"x","cluster_uuid":"uuid-ok"}`))
+	}))
+	defer srv.Close()
+
+	uuid, err := probeClusterUUID(srv.URL, nil, "pw")
+	if err != nil {
+		t.Fatalf("the probe must authenticate even on the --url path: %v", err)
+	}
+	if uuid != "uuid-ok" {
+		t.Errorf("probed uuid = %q", uuid)
 	}
 }
 

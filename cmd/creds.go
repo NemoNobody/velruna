@@ -153,9 +153,10 @@ refuses cannot work in the runtime either.`,
 						// Storing it — especially over the named entry the runtime
 						// reads first — would swap a working credential for one
 						// the runtime cannot use, and "stored:" would be a lie.
-						fatalErr(fmt.Errorf("the store at %s rejected the new password (HTTP 401): "+
-							"nothing stored — the runtime authenticates the same way; re-run with the right password",
-							config.RedactURL(target)))
+						fatalErr(fmt.Errorf("the store at %s rejected the new password (HTTP 401): nothing stored — "+
+							"the runtime authenticates the same way; re-run with the right password "+
+							"(the probe authenticated as user %q — set OPENSEARCH_USER or opensearch_user if the store uses another)",
+							config.RedactURL(target), probeUser(cfg)))
 					}
 					if recorded := recordedClusterName(cfg); recorded != "" {
 						// The config already names this store (a previous
@@ -213,22 +214,36 @@ func probeRejectedPassword(err error) bool {
 	return errors.Is(err, errPasswordRejected)
 }
 
+// probeUser is the identity the probe authenticates with — the config's
+// user, else OPENSEARCH_USER, else the runtime's default. An anonymous
+// probe against a secured store would answer 401 and read as a rejected
+// password, so probe and runtime must authenticate alike.
+func probeUser(cfg *config.Config) string {
+	if cfg != nil {
+		if u := strings.TrimSpace(cfg.OpenSearchUser); u != "" {
+			return u
+		}
+	}
+	if u := strings.TrimSpace(os.Getenv("OPENSEARCH_USER")); u != "" {
+		return u
+	}
+	return config.DefaultConfig().OpenSearchUser
+}
+
 // probeClusterUUID asks the store who it is, authenticating with the password
 // being stored: the cluster name keys the new entry, so the answer has to come
 // from a request that can already succeed with that credential.
 func probeClusterUUID(target string, base *config.Config, pw string) (string, error) {
-	user, insecure := "", false
+	insecure := false
 	addresses := []string{target}
 	if base != nil {
-		user, insecure = base.OpenSearchUser, base.InsecureSkipVerify
+		insecure = base.InsecureSkipVerify
 		// The store may be alive behind a node that is not the first in the
 		// list: hand the probe every configured node so the client can fail
 		// over instead of declaring a reachable store silent.
 		addresses = base.EffectiveURLs()
 	}
-	if user == "" {
-		user = os.Getenv("OPENSEARCH_USER")
-	}
+	user := probeUser(base)
 	// One deadline covers all attempts; both it and the per-attempt timeout
 	// scale with the node list so a slow node — even one that never answers
 	// — cannot eat the probe before a live node gets its turn. The probe
@@ -246,10 +261,14 @@ func probeClusterUUID(target string, base *config.Config, pw string) (string, er
 	}
 	api, err := opensearchapi.NewClient(opensearchapi.Config{
 		Client: opensearch.Config{
-			Addresses:            addresses,
-			Username:             user,
-			Password:             pw,
-			InsecureSkipVerify:   insecure,
+			Addresses:          addresses,
+			Username:           user,
+			Password:           pw,
+			InsecureSkipVerify: insecure,
+			// One retry budget per node. For a single node the transport
+			// still applies its default retries after transient faults —
+			// safe here because Info is read-only, and the scaled deadline
+			// bounds the whole probe either way.
 			MaxRetries:           len(addresses) - 1,
 			EnableRetryOnTimeout: true,
 			RequestTimeout:       attempt,
