@@ -197,6 +197,51 @@ func TestClusterNameFromEnvAndFile(t *testing.T) {
 	}
 }
 
+// TestUserIsTrimmedLikeTheCluster: the user identity is consumed by the
+// runtime's basic auth, the creds probe and account resolution alike; a
+// padded value must normalize at load time or the same store authenticates
+// differently depending on which consumer reads it.
+func TestUserIsTrimmedLikeTheCluster(t *testing.T) {
+	dir := t.TempDir()
+	restore := chdir(t, dir)
+	defer restore()
+	clearEnv(t)
+
+	conf := filepath.Join(dir, "velruna.conf")
+	if err := os.WriteFile(conf, []byte(`{"opensearch_user": " svc runa "}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { removeFile(t, conf) })
+
+	cfg, err := LoadConfig()
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	if cfg.OpenSearchUser != "svc runa" {
+		t.Errorf("OpenSearchUser = %q, want the padded value trimmed", cfg.OpenSearchUser)
+	}
+
+	t.Setenv("OPENSEARCH_USER", "  from-env  ")
+	cfg, err = LoadConfig()
+	if err != nil {
+		t.Fatalf("LoadConfig with env: %v", err)
+	}
+	if cfg.OpenSearchUser != "from-env" {
+		t.Errorf("env user = %q, want trimmed from-env", cfg.OpenSearchUser)
+	}
+
+	// Whitespace-only must read as unset, not as an anonymous override that
+	// blanks the configured identity.
+	t.Setenv("OPENSEARCH_USER", "   ")
+	cfg, err = LoadConfig()
+	if err != nil {
+		t.Fatalf("LoadConfig with blank env: %v", err)
+	}
+	if cfg.OpenSearchUser != "svc runa" {
+		t.Errorf("blank env must not blank the configured user: %q", cfg.OpenSearchUser)
+	}
+}
+
 // TestSetConfigValuePreservesTheFile: recording the cluster name must not
 // rewrite or lose anything else the operator put in the config.
 func TestSetConfigValuePreservesTheFile(t *testing.T) {

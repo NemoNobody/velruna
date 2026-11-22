@@ -350,8 +350,12 @@ func loadConfig(explicitPath string, finder func() string) (*Config, error) {
 	if v := os.Getenv("OPENSEARCH_CLUSTER"); v != "" {
 		cfg.OpenSearchCluster = strings.TrimSpace(v)
 	}
-	if user := os.Getenv("OPENSEARCH_USER"); user != "" {
-		cfg.OpenSearchUser = user
+	if u := strings.TrimSpace(os.Getenv("OPENSEARCH_USER")); u != "" {
+		// Trimmed like opensearch_cluster: the identity travels between the
+		// runtime, the creds keyring account and the creds probe, and a
+		// padded " admin " would authenticate differently in each — the
+		// probe (trimmed) would succeed while the runtime (padded) 401s.
+		cfg.OpenSearchUser = u
 	}
 	if pass := os.Getenv("OPENSEARCH_PASSWORD"); pass != "" {
 		cfg.OpenSearchPassword = pass
@@ -856,8 +860,8 @@ func loadFile(cfg *Config, path string) error {
 	if c.OpenSearchCluster != "" {
 		cfg.OpenSearchCluster = strings.TrimSpace(c.OpenSearchCluster)
 	}
-	if c.OpenSearchUser != "" {
-		cfg.OpenSearchUser = c.OpenSearchUser
+	if u := strings.TrimSpace(c.OpenSearchUser); u != "" {
+		cfg.OpenSearchUser = u
 	}
 	if c.OpenSearchPassword != "" {
 		cfg.OpenSearchPassword = c.OpenSearchPassword
