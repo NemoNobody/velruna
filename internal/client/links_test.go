@@ -124,3 +124,80 @@ func TestIncomingLinksStoreFailureIsNotCleared(t *testing.T) {
 		t.Fatal("a failed link probe must not clear the guard")
 	}
 }
+
+// links check must surface every way an edge goes wrong, in one bounded walk:
+// a missing target, a retired target, and a loop.
+func TestCheckLinksReportsEveryBreak(t *testing.T) {
+	store := &supersedeStore{docs: map[string]string{
+		"a":       factJSON("a", "verified", "2026-01-01T00:00:00Z", "b"),
+		"b":       factJSON("b", "verified", "2026-01-01T00:00:00Z", ""),
+		"gone":    factJSON("gone", "verified", "2026-01-01T00:00:00Z", "ghost"),
+		"dead":    factJSON("dead", "verified", "2026-01-01T00:00:00Z", "retired"),
+		"retired": factJSON("retired", "obsolete", "2026-01-01T00:00:00Z", ""),
+		"p":       factJSON("p", "verified", "2026-01-01T00:00:00Z", "q"),
+		"q":       factJSON("q", "verified", "2026-01-01T00:00:00Z", "p"),
+	}}
+	c, _ := supersedeClient(t, store)
+
+	rep, err := c.CheckLinks(context.Background(), 0)
+	if err != nil {
+		t.Fatalf("CheckLinks: %v", err)
+	}
+	if rep.Edges != 5 || rep.Truncated {
+		t.Errorf("edges=%d truncated=%v, want 5/false", rep.Edges, rep.Truncated)
+	}
+	want := []struct{ key, problem string }{
+		{"dead", "unverified"},
+		{"gone", "dangling"},
+		{"p", "cycle"},
+		{"q", "cycle"},
+	}
+	if len(rep.Findings) != len(want) {
+		t.Fatalf("findings = %+v, want %d", rep.Findings, len(want))
+	}
+	for i, f := range rep.Findings {
+		if f.Key != want[i].key || f.Problem != want[i].problem {
+			t.Errorf("finding %d = %s/%s, want %s/%s", i, f.Key, f.Problem, want[i].key, want[i].problem)
+		}
+	}
+	// The clean edge names nothing.
+	for _, f := range rep.Findings {
+		if f.Key == "a" {
+			t.Errorf("a verified link was reported: %+v", f)
+		}
+	}
+}
+
+// The scan is bounded: beyond --limit the report says it is truncated rather
+// than pretending the graph was fully walked.
+func TestCheckLinksTruncates(t *testing.T) {
+	store := &supersedeStore{docs: map[string]string{
+		"hub": factJSON("hub", "verified", "2026-01-01T00:00:00Z", ""),
+	}}
+	for i := 0; i < 12; i++ {
+		key := "ref-" + string(rune('a'+i))
+		store.docs[key] = factJSON(key, "verified", "2026-02-01T00:00:00Z", "hub")
+	}
+	c, _ := supersedeClient(t, store)
+
+	rep, err := c.CheckLinks(context.Background(), 5)
+	if err != nil {
+		t.Fatalf("CheckLinks: %v", err)
+	}
+	if rep.Edges != 5 || !rep.Truncated || rep.Total != 12 {
+		t.Errorf("edges=%d truncated=%v total=%d, want 5/true/12", rep.Edges, rep.Truncated, rep.Total)
+	}
+}
+
+// A failed scan is an error, not an empty clean report.
+func TestCheckLinksStoreFailureIsError(t *testing.T) {
+	c, _ := newFakeClient(t, func(r recordedRequest) (int, string) {
+		if r.Method == http.MethodPost && r.Path == "/velruna/_search" {
+			return http.StatusInternalServerError, `{"error":{"type":"cluster_exception"}}`
+		}
+		return http.StatusOK, `{}`
+	})
+	if _, err := c.CheckLinks(context.Background(), 0); err == nil {
+		t.Fatal("a failed scan must not report a clean graph")
+	}
+}

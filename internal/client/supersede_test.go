@@ -39,22 +39,55 @@ func (s *supersedeStore) respond(r recordedRequest) (int, string) {
 		s.writes = append(s.writes, key)
 		return http.StatusOK, `{"_index":"velruna","_id":"` + key + `","result":"updated"}`
 	case r.Method == http.MethodPost && r.Path == "/velruna/_search":
-		// The only search the write path issues is the incoming-link probe.
+		// The write path's incoming probe (term) and links check's full scan
+		// (exists) are the only searches these fixtures serve.
 		return s.linkSearch(r.Body)
+	case r.Method == http.MethodPost && r.Path == "/velruna/_mget":
+		return s.linkMGet(r.Body)
 	}
 	return http.StatusInternalServerError, `{"status":500,"error":"unexpected ` + r.Method + " " + r.Path + `"}`
 }
 
-// linkSearch answers a superseded_by term probe from the stored documents.
+// linkSearch answers a superseded_by term probe (incoming links) or an
+// exists-field scan (links check) from the stored documents.
 func (s *supersedeStore) linkSearch(body string) (int, string) {
 	var req struct {
 		Query struct {
-			Term map[string]json.RawMessage `json:"term"`
+			Term   map[string]json.RawMessage `json:"term"`
+			Exists map[string]string          `json:"exists"`
+			Bool   struct {
+				Filter []struct {
+					Exists map[string]string `json:"exists"`
+				} `json:"filter"`
+				MustNot []struct {
+					Term map[string]string `json:"term"`
+				} `json:"must_not"`
+			} `json:"bool"`
 		} `json:"query"`
 		Size int `json:"size"`
 	}
 	if err := json.Unmarshal([]byte(body), &req); err != nil {
 		return http.StatusBadRequest, `{"error":"bad probe body"}`
+	}
+	scan := req.Query.Exists["field"] == "superseded_by"
+	for _, f := range req.Query.Bool.Filter {
+		if f.Exists["field"] == "superseded_by" {
+			scan = true
+		}
+	}
+	if scan {
+		// The scan must exclude empty links: without the must_not they consume
+		// scan slots and blur the truncation signal.
+		filtered := false
+		for _, m := range req.Query.Bool.MustNot {
+			if v, ok := m.Term["superseded_by"]; ok && v == "" {
+				filtered = true
+			}
+		}
+		if !filtered {
+			return http.StatusBadRequest, `{"error":"scan must exclude empty superseded_by links"}`
+		}
+		return s.linkScan(req.Size)
 	}
 	target := ""
 	for _, raw := range req.Query.Term {
@@ -89,6 +122,57 @@ func (s *supersedeStore) linkSearch(body string) (int, string) {
 		hits = append(hits, `{"_source":{"key":"`+key+`"}}`)
 	}
 	return http.StatusOK, `{"hits":{"total":{"value":` + fmt.Sprint(total) + `},"hits":[` + strings.Join(hits, ",") + `]}}`
+}
+
+// linkScan answers links check's exists scan: every document that carries a
+// superseded_by link, its key and target in _source.
+func (s *supersedeStore) linkScan(size int) (int, string) {
+	var hits []string
+	total := 0
+	for key, src := range s.docs {
+		var doc struct {
+			SupersededBy string `json:"superseded_by"`
+		}
+		if err := json.Unmarshal([]byte(src), &doc); err != nil || doc.SupersededBy == "" {
+			continue
+		}
+		total++
+		if size > 0 && len(hits) >= size {
+			continue
+		}
+		hits = append(hits, `{"_source":{"key":"`+key+`","superseded_by":"`+doc.SupersededBy+`"}}`)
+	}
+	return http.StatusOK, `{"hits":{"total":{"value":` + fmt.Sprint(total) + `},"hits":[` + strings.Join(hits, ",") + `]}}`
+}
+
+// linkMGet answers links check's target probes with found + status from the
+// stored documents.
+func (s *supersedeStore) linkMGet(body string) (int, string) {
+	var req struct {
+		Docs []struct {
+			ID string `json:"_id"`
+		} `json:"docs"`
+	}
+	if err := json.Unmarshal([]byte(body), &req); err != nil {
+		return http.StatusBadRequest, `{"error":"bad mget body"}`
+	}
+	var docs []string
+	for _, d := range req.Docs {
+		src, ok := s.docs[d.ID]
+		if !ok {
+			docs = append(docs, `{"_index":"velruna","_id":"`+d.ID+`","found":false}`)
+			continue
+		}
+		var fact struct {
+			Status string `json:"status"`
+		}
+		if err := json.Unmarshal([]byte(src), &fact); err != nil {
+			docs = append(docs, `{"_index":"velruna","_id":"`+d.ID+`","found":false}`)
+			continue
+		}
+		docs = append(docs, `{"_index":"velruna","_id":"`+d.ID+`","found":true,"_source":{"status":"`+fact.Status+`"}}`)
+	}
+	return http.StatusOK, `{"docs":[` + strings.Join(docs, ",") + `]}`
 }
 
 // factJSON renders a stored fact document. created is the creation date the
