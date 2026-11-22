@@ -53,10 +53,22 @@ of them.`,
 			}
 			fmt.Printf("links: %d edge(s) inspected", rep.Edges)
 			if rep.Skipped > 0 {
-				fmt.Printf(", %d hit(s) unreadable", rep.Skipped)
+				fmt.Printf(", %d hit(s) carried a superseded_by this client cannot read (not audited)", rep.Skipped)
 			}
-			if rep.Truncated {
-				fmt.Printf(" (%d edges in the store; raise --limit)", rep.Total)
+			// Only hits the store counted but the scan did not return are
+			// recoverable by --limit; unreadable hits were fetched already,
+			// and telling the operator to raise the limit for them is wrong
+			// advice (cf. fetch/journal, which treat skipped the same way).
+			if missed := rep.Total - rep.Edges - rep.Skipped; missed > 0 {
+				effectiveLimit := limit
+				if effectiveLimit <= 0 {
+					effectiveLimit = 1000
+				}
+				if effectiveLimit < 10000 {
+					fmt.Printf(", %d edge(s) in the store not fetched (raise --limit)", missed)
+				} else {
+					fmt.Printf(", %d edge(s) in the store not fetched (--limit is at its 10000 cap)", missed)
+				}
 			}
 			fmt.Println()
 			for _, f := range rep.Findings {
@@ -68,7 +80,16 @@ of them.`,
 					"or retire the source as well")
 				os.Exit(1)
 			}
-			fmt.Println("clean: every superseded_by link resolves to a verified fact")
+			// "clean" may only be claimed for a fully audited graph: with
+			// unaudited edges (skipped or not fetched) the honest answer is
+			// "nothing broken among what was audited", never a promise about
+			// the rest.
+			switch {
+			case rep.Skipped > 0 || rep.Truncated:
+				fmt.Println("no broken edges among the audited links; the graph was NOT fully audited (see the counts above)")
+			default:
+				fmt.Println("clean: every superseded_by link resolves to a verified fact")
+			}
 		},
 	}
 	cmd.Flags().IntVar(&limit, "limit", 0, "max edges to inspect (default 1000, max 10000)")

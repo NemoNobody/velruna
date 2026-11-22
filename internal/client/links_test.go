@@ -112,6 +112,29 @@ func TestIncomingLinksReportIsBounded(t *testing.T) {
 	}
 }
 
+// A keyword array is flattened by the store: a legacy referrer whose
+// superseded_by list carries the key really does point there, so the guard
+// must count it instead of explaining the document away as unparsable.
+func TestIncomingLinksLegacyArrayReferrerBlocks(t *testing.T) {
+	store := &supersedeStore{docs: map[string]string{
+		"hub":   factJSON("hub", "verified", "2026-01-01T00:00:00Z", ""),
+		"multi": `{"key":"multi","status":"verified","superseded_by":["hub","other"]}`,
+	}}
+	c, _ := supersedeClient(t, store)
+
+	keys, total, _, err := c.incomingSupersedeRefs(context.Background(), "hub")
+	if err != nil {
+		t.Fatalf("incomingSupersedeRefs: %v", err)
+	}
+	if total != 1 || len(keys) != 1 || keys[0] != "multi" {
+		t.Errorf("total=%d keys=%v, want 1 and [multi]", total, keys)
+	}
+	if err := c.refuseRetireWithIncoming(context.Background(), "hub"); err == nil ||
+		!strings.Contains(err.Error(), "multi") {
+		t.Errorf("the array referrer must block the retirement and be named: %v", err)
+	}
+}
+
 // The guard is a store read: when the store fails, the retirement fails with
 // the store error rather than a false "no links" verdict.
 func TestIncomingLinksStoreFailureIsNotCleared(t *testing.T) {

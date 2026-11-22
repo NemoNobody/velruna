@@ -168,20 +168,20 @@ func matchClause(cl linkClause, key, status string, superseded json.RawMessage) 
 		if err := json.Unmarshal(rawVal, &want); err != nil {
 			return false
 		}
-		var got string
 		switch field {
 		case "key":
-			got = key
+			if key != want {
+				return false
+			}
 		case "status":
-			got = status
+			if status != want {
+				return false
+			}
 		case "superseded_by":
-			if err := json.Unmarshal(superseded, &got); err != nil {
-				return false // multi-valued or absent: a term probe never matches
+			if !termMatches(superseded, want) {
+				return false
 			}
 		default:
-			return false
-		}
-		if got != want {
 			return false
 		}
 	}
@@ -196,6 +196,27 @@ func matchClause(cl linkClause, key, status string, superseded json.RawMessage) 
 		}
 	}
 	return true
+}
+
+// termMatches mirrors how the real store flattens keyword arrays: a term
+// matches a scalar exactly, or an array when ANY element equals the value. A
+// legacy multi-valued superseded_by therefore does NOT hide the referrer from
+// the retire guard, and an array carrying "" really is excluded by must_not
+// term superseded_by:"".
+func termMatches(raw json.RawMessage, want string) bool {
+	var scalar string
+	if err := json.Unmarshal(raw, &scalar); err == nil {
+		return scalar == want
+	}
+	var list []string
+	if err := json.Unmarshal(raw, &list); err == nil {
+		for _, v := range list {
+			if v == want {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // linkMGet answers links check's target probes with found + status from the

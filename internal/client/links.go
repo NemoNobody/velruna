@@ -47,8 +47,12 @@ func (c *Client) incomingSupersedeRefs(ctx context.Context, key string) ([]strin
 				map[string]interface{}{"term": map[string]interface{}{"key": key}},
 			},
 		}},
-		"size":    incomingProbeLimit,
-		"_source": []string{"key"},
+		// Exact totals: the refusal states the count as fact, and the default
+		// 10000-capped gte estimate would undercount silently — the same pin
+		// the scan applies below.
+		"track_total_hits": true,
+		"size":             incomingProbeLimit,
+		"_source":          []string{"key"},
 	})
 	if err != nil {
 		return nil, 0, false, fmt.Errorf("build link probe: %w", err)
@@ -165,7 +169,10 @@ func (c *Client) CheckLinks(ctx context.Context, limit int) (*LinksReport, error
 				map[string]interface{}{"exists": map[string]interface{}{"field": "superseded_by"}},
 			},
 			// An empty link is not an edge: without this filter such docs
-			// eat scan slots and blur the truncation signal.
+			// eat scan slots and blur the truncation signal. The store
+			// flattens keyword arrays, so a legacy superseded_by carrying
+			// "" alongside a real edge is excluded here too — a known
+			// limitation of any keyword filter, not a lookup miss.
 			"must_not": []interface{}{
 				map[string]interface{}{"term": map[string]interface{}{"superseded_by": ""}},
 			},
