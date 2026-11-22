@@ -18,9 +18,9 @@ import (
 
 // addCorrectionScript records a value change on the main fact doc: the new
 // value replaces the old, and current_ref points at the journal entry that
-// was appended for it (the journal append happens BEFORE this script: the
-// journal is the log, the main doc is the projection, and an orphan journal
-// entry from a failed main write is a harmless truth, never a lost value).
+// will be appended for it (the doc write happens BEFORE the journal append:
+// doc-first, so a failed main write means nothing was accepted at all, and
+// an entry that fails to land only leaves current_ref dangling).
 // updated_by moves to the last toucher; the birth author labels are
 // write-once and deliberately absent from this script.
 //
@@ -99,10 +99,10 @@ func redactionsForFields(rows []model.Redaction, fields ...string) []model.Redac
 // journal entry is appended for the new value, then the main doc is
 // corrected to point at it — this also resurrects an obsolete fact).
 //
-// The journal append precedes the main write: the journal is the accepted
-// log, the main doc is the projection. A failed main write leaves an orphan
-// entry (truth: the value was accepted, the projection lags and is fixed by
-// the next write); the reverse order could lose values from the log.
+// The main write precedes the journal append (doc-first): a failed main
+// write means nothing was accepted and the answer can say so truthfully;
+// a failed append leaves the accepted value in the doc with current_ref
+// dangling until the next correction journals it.
 //
 // Notes are only replaced by a non-empty new note: the CLI flag and the MCP
 // field default to empty, and a correction without --notes must not silently

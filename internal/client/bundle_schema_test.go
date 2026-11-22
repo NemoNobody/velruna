@@ -170,13 +170,20 @@ func TestBundleObjectsResolveAgainstTheCurrentSchema(t *testing.T) {
 		}
 		title := ""
 		refNameToTitle := map[string]string{}
+		patternRefs := 0
 		for _, r := range refs {
 			if r.Type == "index-pattern" {
+				patternRefs++
 				if ti, ok := patternTitleByID[r.ID]; ok {
 					title = ti
 					refNameToTitle[r.Name] = ti
 				}
 			}
+		}
+		if patternRefs > 1 {
+			// A vis with several pattern refs would make the empty-meta.index
+			// fallback below (and the "its own pattern" reading) arbitrary.
+			t.Errorf("visualization %s carries %d index-pattern refs; the fallback pattern would be ambiguous", o.ID, patternRefs)
 		}
 		if title == "" {
 			t.Errorf("visualization %s references no known index-pattern", o.ID)
@@ -253,7 +260,7 @@ func TestBundleObjectsResolveAgainstTheCurrentSchema(t *testing.T) {
 					ft, ok = refNameToTitle[fl.Meta.Index]
 				}
 				if !ok {
-					t.Errorf("visualization %s: filter on %q names pattern %q the vis does not reference", o.ID, fl.Meta.Key, fl.Meta.Index)
+					t.Errorf("visualization %s: filter on %q names pattern %q the test cannot resolve (unknown title, or not one of the vis's patterns)", o.ID, fl.Meta.Key, fl.Meta.Index)
 					continue
 				}
 				f2, ok := fieldSets[ft]
