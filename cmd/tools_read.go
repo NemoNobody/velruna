@@ -328,13 +328,15 @@ type journalEntryView struct {
 	FactID       string            `json:"fact_id,omitempty" jsonschema:"stable fact identity the entry belongs to"`
 	Project      string            `json:"project,omitempty" jsonschema:"project of the entry"`
 	Category     string            `json:"category,omitempty" jsonschema:"category at the time of the entry"`
-	Op           string            `json:"op" jsonschema:"write (an accepted value) | rediscovery (a re-confirmation of the same value) | retire (verified→obsolete transition)"`
+	Op           string            `json:"op" jsonschema:"write (an accepted value) | rediscovery (a re-confirmation of the same value) | retire (verified→obsolete transition) | supersede (a superseded_by link: a relation, not a value change)"`
 	Value        string            `json:"value" jsonschema:"the accepted value at that moment"`
 	Notes        string            `json:"notes,omitempty" jsonschema:"notes shipped with the write"`
 	Source       string            `json:"source,omitempty" jsonschema:"source shipped with the write"`
 	Keywords     []string          `json:"keywords,omitempty" jsonschema:"tag set as of this accepted value (a tag-only change is a touch, so the previous set stays in the last entry that carried it)"`
 	Redactions   []model.Redaction `json:"redactions,omitempty" jsonschema:"spans the write-time secret guard replaced in this version (see velruna_add)"`
 	CreatedAt    time.Time         `json:"created_at" jsonschema:"writer-side observation time (UTC)"`
+	SupersededBy string            `json:"superseded_by,omitempty" jsonschema:"successor link stated by this entry (see velruna_patch superseded_by)"`
+	Marker       string            `json:"marker,omitempty" jsonschema:"machine-readable qualifier of the entry, e.g. superseded-newer-with-older (a newer fact declared an older successor)"`
 	Author       string            `json:"author,omitempty" jsonschema:"who appended this entry (self-reported label)"`
 	AuthorSource string            `json:"author_source,omitempty" jsonschema:"security | config | os | none for this writer"`
 	Model        string            `json:"model,omitempty" jsonschema:"model label of this writer"`
@@ -348,9 +350,11 @@ func newJournalEntryViews(entries []model.JournalEntry) []journalEntryView {
 		views = append(views, journalEntryView{
 			FactKey: e.FactKey, FactID: e.FactID, Project: e.Project, Category: e.Category,
 			Op: e.Op, Value: e.Value, Notes: e.Notes, Source: e.Source, CreatedAt: e.CreatedAt,
-			Keywords:   e.Keywords,
-			Redactions: e.Redactions,
-			Author:     e.Author, AuthorSource: e.AuthorSource, Model: e.Model,
+			Keywords:     e.Keywords,
+			Redactions:   e.Redactions,
+			SupersededBy: e.SupersededBy,
+			Marker:       e.Marker,
+			Author:       e.Author, AuthorSource: e.AuthorSource, Model: e.Model,
 			Host: e.Host, Session: e.Session,
 		})
 	}
