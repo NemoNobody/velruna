@@ -7,7 +7,7 @@ overview". It covers facts, the journal (history) and cached documents:
 |-------|---------|
 | Facts / Journal entries / Docs cached / Facts with history (KPI row) | how much is stored, how live the journal is |
 | Facts updates over time / Journal writes over time / Docs fetched over time | activity trends (area charts over the time field) |
-| Journal ops | writes/patches/rediscoveries per bucket (histogram over `op`) |
+| Journal ops | writes/rediscoveries/retires/supersedes per bucket (histogram over `op`) |
 | Journal entries per period index | how the monthly history indices grow |
 | By project / category / status (donuts) | what kind of knowledge is in the store |
 | Top fact keys by journal writes | the hottest facts (re-verification candidates) |

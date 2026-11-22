@@ -475,8 +475,9 @@ boundary `status` reports when it prints `schema: unreadable (HTTP 403)`.
 ## Re-verification (`confirmed_by`)
 
 `stale` is an instruction to re-check, and a re-check has to leave a trace.
-Without one, a fact could never become fresh again (a same-value re-add is a
-touch: it deliberately does not move `observed_at`).
+Without one, a fact could never become fresh again (on a verified fact: a
+same-value re-add is a touch and deliberately does not move `observed_at`;
+an obsolete fact's re-add is a resurrection and re-dates it).
 
 `velruna_patch {reverify: true}` re-confirms the current value in place:
 `observed_at` moves to now, the journal gains an `op=rediscovery` entry (who,

@@ -252,7 +252,7 @@ Two differences from a host install:
 
 Config lookup order:
 
-1. `--conf <path>` flag (`velruna mcp`, `velruna status`, `velruna dashboards push`)
+1. `--conf <path>` flag (`velruna mcp`, `velruna status`, `velruna dashboards push|gen-fields`)
 2. `VELRUNA_CONF` environment variable
 3. `./velruna.conf` (current directory)
 4. `velruna.conf` next to the binary

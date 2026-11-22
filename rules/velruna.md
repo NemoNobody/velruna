@@ -24,7 +24,7 @@ Paste this into your always-on rules:
 - End of a session → `velruna_add_batch` with the state facts (the project's
   open items and its git state) — one round-trip.
 - Before re-verifying something → `velruna_search <query>` / `velruna_get <key>`; after verifying something new → `velruna_add`. Keys are navigated with `velruna_keys` (search matches values/notes/summaries, not keys).
-- Value changed → correct via the same key; the accepted value is appended to the history journal. A key names a stable subject — predictable English, not a value (`proj:api:port`, not `proj:api:v1`).
+- Value changed → correct via the same key; the fact points at a preallocated journal entry (doc-first) and the entry is appended under it. A key names a stable subject — predictable English, not a value (`proj:api:port`, not `proj:api:v1`).
 - Qualifiers and doubts → `notes` ("checked the dev config only"); the cheap qualifier update is `velruna_patch` with `notes_append` (dated line, atomic, no value resend). Subject gone → `velruna_obsolete <key> [reason]`.
 - Long value (over `summary_min_len`) → `velruna_add` requires a `summary`: a short table-of-contents rendering (under `summary_max_len`) — search/find by summary, read the full value by key.
 - Reads return the current value only (`stale`/`age_days` included); history costs context — use `velruna_history_info` (cheap counts) and `velruna_journal` (the entries) only when the history matters. `stale: true` → re-verify against the source before trusting.
@@ -82,9 +82,10 @@ separate docs index. See `docs/mcp.md` — this rule is about the facts.
 
 - `verified` — the subject exists; `obsolete` — the subject is gone (file
   deleted, endpoint removed without a successor).
-- **Value changed** → `velruna_add` with the same key: the accepted value is
-  journaled and the fact points at it, `observed_at` = now. That is a
-  correction, not a loss.
+- **Value changed** → `velruna_add` with the same key: the fact points at a
+  preallocated journal entry (doc-first) and the entry is appended under it;
+  `observed_at` = now (on an obsolete fact this also resurrects it: status
+  back to `verified`). That is a correction, not a loss.
 - **Same key + same value** → no journal entry and `observed_at` stays (the
   observation is old, the note is new); `notes`/`source`/`keywords`/`ttl_days`
   move only when supplied, while `category` is rewritten by every add (it sets
