@@ -16,8 +16,9 @@ notes).
   is not verified), `cycle` (the edge loops). Exit 1 when findings exist, exit
   2 when the check itself could not run. A scan that could not audit every
   edge says so and never claims "clean": hits the scan fetched but could not
-  read are counted apart from edges it never fetched (only those are
-  recoverable by raising `--limit`). Repair by repointing the source
+  read, edges it never fetched, and edges fetched but left unaudited at
+  `--limit` are counted apart; raising `--limit` recovers the second and
+  third kinds, never edges beyond the 10000-hit result window. Repair by repointing the source
   (`velruna_patch superseded_by`) or retiring it too.
 - retire guard: `velruna_obsolete` and a `velruna_patch` status flip to
   `obsolete` are refused while other verified facts point at the target with
@@ -44,7 +45,12 @@ notes).
   name the config already records instead of stranding the password under a
   host account, while a store that answers and rejects the new password
   (HTTP 401) aborts the write rather than replacing a working entry with a
-  credential the runtime cannot use; `creds rm --name` cleans entries the
+  credential the runtime cannot use; the probe authenticates exactly like
+  the runtime (config user → `OPENSEARCH_USER` → the default; under `--url`
+  the config is bypassed and only `OPENSEARCH_USER` applies) and is bounded
+  per node (n×10s overall, capped 90s, at least 5s per attempt), so a hung
+  node cannot make a reachable store look silent; `creds rm --name` cleans
+  entries the
   config no longer names; legacy host-named entries stay readable.
 - MCP bundle (`.mcpb`): every release now attaches a universal
   `velruna-<version>.mcpb` plus per-OS `-darwin`, `-linux` and `-windows`
@@ -78,6 +84,18 @@ notes).
 
 - `creds get` is gone: the password is never printed. MCP learns it through
   the keyring; scripts read `OPENSEARCH_PASSWORD`.
+- load-time trim parity: `opensearch_user` and `opensearch_cluster` are
+  trimmed from the file and the env alike, and a blank value reads as unset
+  and keeps the configured one — the creds probe, the keyring account and
+  the runtime authenticate with an identical identity.
+- a partial-success add (the fact write landed, the journal entry lagged)
+  reports the truth: `Resurrected` is set when the accepted write re-dated
+  an obsolete fact, and the error text names it (`correction accepted
+  (resurrecting an obsolete fact), the journal entry lagged`) — at the MCP
+  error edge the text is the only surface. The add note texts describe the
+  same-value touch exactly (notes/source when supplied, `category` always,
+  `ttl_days`/`keywords` when given); batch item errors carry only the batch
+  label, not the `velruna_add` prefix.
 
 ## v0.8.10 — 2026-11-21
 

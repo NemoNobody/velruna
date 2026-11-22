@@ -10,8 +10,10 @@ what was run live against real clusters.
   runs on every push (`.github/workflows/ci.yml`).
 - more than 400 test functions exercise the HTTP contract against a fake
   OpenSearch (`httptest`): which endpoints are called, with what parameters and bodies —
-  index creation, composable journal templates, the ingest pipeline, scripted
-  corrections with optimistic concurrency (`seq_no`/`primary_term`), the prune
+  index creation, composable journal templates, the ingest pipeline,
+  snapshot-derived writes (touch, resurrect, retire, status flip) guarded by
+  optimistic concurrency (`seq_no`/`primary_term`) while value corrections are
+  deliberately last-writer-wins, the prune
   scripts, wildcard reads with `ignore_unavailable`, search bodies.
 - The fake transport is deliberate: the contract, not OpenSearch itself, is
   where the historical bugs lived (read-after-write, read-only stores).

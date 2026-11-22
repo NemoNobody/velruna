@@ -70,11 +70,13 @@ Bundle invariants (OSD 3.x quirks, all learned live):
 - the dashboard pins `timeRestore` + `now-90d..now`, otherwise the
   default "last 15 minutes" renders it empty.
 
-Panel inventory: 6 KPI tiles (facts, journal entries, docs cached,
-facts with history, obsolete facts, docs aging 30d+ — the last two are
-filtered metrics), 3 time-area charts (facts updates / journal writes /
+Panel inventory (18 visualizations + the dashboard): 6 KPI tiles (facts,
+journal entries, docs cached, facts with history, obsolete facts, Docs past
+TTL — a filtered metric over `expires_at`, the last two are filtered),
+3 time-area charts (facts updates / journal writes /
 docs fetched over time), journal ops histogram, journal entries per period
-index, three donuts (project/category/status), top fact keys horizontal bar.
+index, three donuts (project/category/status), three docs breakdowns (by
+via / fetched_by / project), top fact keys horizontal bar.
 Index SIZES are deliberately absent: sizes live outside searchable data and
 Vega url data sources are GET-only (the OSD console proxy is POST-only).
 A size TREND needs a self-monitoring metric (planned, not built yet).

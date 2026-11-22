@@ -42,9 +42,10 @@ Each fact carries evidence, not verdicts:
 - **provenance** (`source`): where it came from — `tool:read_file`,
   `experiment`, `user:confirmed`, `doc:*`;
 - **observation time** (`observed_at`): when the value was actually seen;
-- **history**: every accepted value is appended to an append-only journal
-  index (`<index>-history-<period-date>`, monthly by default) instead of
-  overwriting the fact; entries are never rewritten and the journal is not
+- **history**: the fact doc keeps the current value, and every accepted
+  change is journaled to an append-only index
+  (`<index>-history-<period-date>`, monthly by default) — the superseded
+  state is never lost; entries are never rewritten and the journal is not
   pruned by default (write-forever), so history shows how old it is;
 - **notes**: free-text qualifiers, e.g. "checked the dev config only";
 - **authorship**: every write is stamped with who recorded it (the store's
@@ -192,7 +193,8 @@ The full annotated example (index names, TTLs, fetch options) is
 local node only — verification is on by default.
 
 The index is created automatically on first use. Env vars override the file:
-`OPENSEARCH_URL`, `OPENSEARCH_URLS`, `OPENSEARCH_USER`, `OPENSEARCH_PASSWORD`,
+`OPENSEARCH_URL`, `OPENSEARCH_URLS`, `OPENSEARCH_USER`, `OPENSEARCH_CLUSTER`,
+`OPENSEARCH_PASSWORD`,
 `OPENSEARCH_INSECURE_SKIP_VERIFY`, `VELRUNA_INDEX`, `VELRUNA_HISTORY_PERIOD`,
 `VELRUNA_HISTORY_LIMIT`, `VELRUNA_SUMMARY_MIN_LEN`, `VELRUNA_SUMMARY_MAX_LEN`,
 `VELRUNA_SECRET_GUARD`, `VELRUNA_ALLOW_PLAINTEXT`,
@@ -271,6 +273,7 @@ the 2 MB `fetch_max_bytes` limit is refused with an error, not trimmed.
 | `velruna prune <key> [--keep N] [--yes]` | Drop old journal entries, keeping the newest N (manual admin tool: destructive, without `--yes` only the plan is printed) |
 | `velruna migrate-history [--project <p>] [--yes]` | Move pre-journal in-doc history arrays into the journal (one-time; plan first, `--yes` to write) |
 | `velruna obsolete <key> [reason] [--allow-secret]` | Mark a fact obsolete because its subject is gone (reason appended to notes) |
+| `velruna links check [--limit N]` | Audit the superseded_by graph in one bounded read: dangling targets, unverified targets, cycles; the summary names what the scan could not audit (partial audits never claim "clean") |
 | `velruna status [--conf <path>]` | Check connectivity and show the effective configuration (env overrides are listed by name, never values) |
 | `velruna creds set\|status\|rm [--url <u>]` | Manage the OpenSearch password in the OS keyring: `set` reads a hidden prompt (piped stdin for scripts) and keys the entry by store identity — `cluster/<cluster_uuid>` (or `--name <label>`), recorded in the config as `opensearch_cluster`; `status` shows the candidate entries and the source, never a value; `rm [--legacy]` deletes |
 | `velruna fetch <url> [--refresh] [-p <p>] [--allow-secret] [--max-chars N] [--block-chars N]` | Fetch a page into the docs index and print its outline: cache-aware, blocks are read on demand; `--max-chars 0` stores the whole document (default `fetch_doc_chars`), `--block-chars` sets the target block size; github URLs that match a local clone print the file path |
@@ -280,12 +283,15 @@ the 2 MB `fetch_max_bytes` limit is refused with an error, not trimmed.
 
 Exit codes: `0` success, `1` any error, `3` the named key does not exist
 (`get`/`obsolete`/`prune`) — scripts can tell a missing fact from an
-unreachable store without parsing stderr.
+unreachable store without parsing stderr. `links check` is the exception:
+`0` no findings (the summary says whether the audit was partial), `1`
+findings exist, `2` the check itself could not run.
 
 Key convention: the key names a **stable subject**, not its current value —
 `demo:api:port`, not `demo:api:v1`. Re-using the same key with a new value is a
-correction: the fact points at a fresh journal entry (doc-first) and the entry
-is appended under it; re-adding the same value updates notes/source (plus
+correction (over an obsolete fact it resurrects the fact too): the fact points
+at a fresh journal entry (doc-first) and the entry is appended under it;
+re-adding the same value updates notes/source (plus
 `category`, and `ttl_days`/`keywords` when given) — except an obsolete fact,
 whose re-add resurrects it (journaled, `observed_at` moves).
 
@@ -301,7 +307,7 @@ history unless
 `include_history=true` is passed (that chain is the legacy pre-journal
 in-doc array; journal history is read with `velruna_journal` /
 `velruna_history_info`), and carry `age_days`/`stale`. `velruna_list` is
-compact by default (a table of contents: key/summary/state/age — the full
+compact by default (a table of contents: key/summary/category/status/age — the full
 value is one `velruna_get` away) and newest-activity-first; cheap partial
 updates (dated note, status flip) go through `velruna_patch` without
 re-sending the value; `velruna_add_batch` packs the session-end ritual into
