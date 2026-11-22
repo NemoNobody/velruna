@@ -14,11 +14,11 @@ BIN     ?= velruna
 CONTAINER ?= $(shell if command -v docker >/dev/null 2>&1; then echo "docker compose"; elif command -v podman-compose >/dev/null 2>&1; then echo "podman-compose"; else echo "podman compose"; fi)
 OSFILE := docker/opensearch.yml
 
-.PHONY: build test lint fmt vet ci install clean release dev-opensearch dev-opensearch-down dev-opensearch-logs dev-opensearch-dashboards dev-opensearch-cluster dev-opensearch-secure docker-build docker-smoke stack-up stack-down mcpb
+.PHONY: build test lint fmt vet ci install clean release dev-opensearch dev-opensearch-down dev-opensearch-logs dev-opensearch-dashboards dev-opensearch-cluster dev-opensearch-secure dev-opensearch-secure-dashboards docker-build docker-smoke stack-up stack-down mcpb
 
 # Compose profiles in docker/opensearch.yml. `down` must name them all or
 # profiled services survive it.
-OS_PROFILES := --profile single --profile dashboards --profile cluster --profile secure --profile app
+OS_PROFILES := --profile single --profile dashboards --profile cluster --profile secure --profile secure-dash --profile app
 
 build:
 	go build -trimpath -ldflags "$(LDFLAGS)" -o $(BIN) .
@@ -157,6 +157,22 @@ mcpb:
 	  CGO_ENABLED=0 GOOS=$$os GOARCH=$$arch go build -trimpath -ldflags "$(LDFLAGS)" -o $$out .; \
 	done
 	scripts/build-mcpb.sh $(VERSION) $(DIST) $(DIST)/velruna-$(VERSION).mcpb
+
+# Secured node + Dashboards with the security plugin ON: the server-shaped
+# recipe (login required, tenant switching real, https). Demo certificates, so
+# verification is off inside the stack. UI on http://127.0.0.1:5643
+# (VELRUNA_DASH_SECURE_PORT to move it); login admin / the password you pass.
+dev-opensearch-secure-dashboards:
+	@test -n "$(VELRUNA_SECURE_DEV_PASSWORD)" || { echo "usage: make dev-opensearch-secure-dashboards VELRUNA_SECURE_DEV_PASSWORD=<pw>"; exit 1; }
+	$(CONTAINER) -f $(OSFILE) --profile secure --profile secure-dash up -d
+	@echo "waiting for secured Dashboards on http://127.0.0.1:$${VELRUNA_DASH_SECURE_PORT:-5643} ..."
+	@ok=""; for i in $$(seq 1 80); do \
+	  code=$$(curl -s -o /dev/null -w '%{http_code}' --max-time 3 "http://127.0.0.1:$${VELRUNA_DASH_SECURE_PORT:-5643}/api/status"); \
+	  if [ "$$code" = "200" ] || [ "$$code" = "401" ]; then ok=1; break; fi; \
+	  sleep 3; \
+	done; \
+	if [ -z "$$ok" ]; then echo "secured Dashboards did not answer within ~4 minutes"; exit 1; fi
+	@echo "UI: http://127.0.0.1:$${VELRUNA_DASH_SECURE_PORT:-5643}  (login admin / your VELRUNA_SECURE_DEV_PASSWORD)"
 
 # obscura: one-time installer for the opt-in render fallback (fetch_render=
 # obscura). Third-party binary, ~75MB, linux x86_64 glibc 2.35+; the sha256

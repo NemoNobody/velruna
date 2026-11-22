@@ -1,0 +1,168 @@
+name: Smoke
+
+# Full-stack smoke against a real OpenSearch, run by hand.
+#
+# Not on push: every run pulls and boots container images, and the unit tests
+# already pin the client contract. This is the repeatable check before a
+# release — the CLI against a real cluster, the MCP handshake, and the
+# Dashboards bundle landing in the GLOBAL tenant (with and without security).
+#
+# workflow_dispatch inputs:
+#   opensearch_image — the version under test (default 3.8.0)
+#   secure           — also run the secured stack (login required, real tenants)
+
+on:
+  workflow_dispatch:
+    inputs:
+      opensearch_image:
+        description: "OpenSearch image to test against"
+        default: "opensearchproject/opensearch:3.8.0"
+        required: false
+      secure:
+        description: "Also run the secured stack (Dashboards login + tenant check)"
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+env:
+  VELRUNA_OS_PORT: "9299"
+  VELRUNA_DASH_PORT: "5699"
+  VELRUNA_DASH_SECURE_PORT: "5643"
+  OPENSEARCH_IMAGE: ${{ inputs.opensearch_image || 'opensearchproject/opensearch:3.8.0' }}
+  OSD_IMAGE: opensearchproject/opensearch-dashboards:3.8.0
+
+jobs:
+  single-node:
+    name: single node + dashboards (security off)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Build
+        run: make build
+
+      - name: Start the stack
+        run: |
+          set -euo pipefail
+          cat > ci.conf <<'JSON'
+          {
+            "opensearch_url": "http://127.0.0.1:9299",
+            "opensearch_user": "dev",
+            "opensearch_password": "dev",
+            "allow_plaintext": true,
+            "index_name": "velruna"
+          }
+          JSON
+          docker compose -f docker/opensearch.yml --profile single --profile dashboards up -d
+          for _ in $(seq 1 60); do
+            curl -sf -o /dev/null --max-time 3 "http://127.0.0.1:$VELRUNA_OS_PORT/_cluster/health" && break
+            sleep 3
+          done
+          for _ in $(seq 1 60); do
+            curl -sf -o /dev/null --max-time 3 "http://127.0.0.1:$VELRUNA_DASH_PORT/api/status" && break
+            sleep 3
+          done
+          curl -sf -o /dev/null "http://127.0.0.1:$VELRUNA_DASH_PORT/api/status"
+
+      - name: CLI smoke
+        run: VELRUNA_CONF="$PWD/ci.conf" VELRUNA_BIN=./velruna hack/cli-smoke.sh
+
+      - name: Dashboards bundle lands in the global tenant
+        run: |
+          set -euo pipefail
+          ./velruna dashboards push --conf ci.conf
+          os="http://127.0.0.1:$VELRUNA_OS_PORT"
+          ui="http://127.0.0.1:$VELRUNA_DASH_PORT"
+          # 1. the document sits behind the .kibana alias (global tenant storage)
+          curl -sf "$os/.kibana/_doc/dashboard%3Avelruna-store-dashboard" | grep -q '"found":true'
+          # 2. the UI can read it
+          title=$(curl -sf -H 'osd-xsrf: smoke' "$ui/api/saved_objects/dashboard/velruna-store-dashboard" |
+            python3 -c 'import json,sys; print(json.load(sys.stdin)["attributes"]["title"])')
+          test "$title" = "Velruna — store overview"
+          # 3. every visualization is there
+          total=$(curl -sf -H 'osd-xsrf: smoke' "$ui/api/saved_objects/_find?type=visualization&per_page=1" |
+            python3 -c 'import json,sys; print(json.load(sys.stdin)["total"])')
+          test "$total" -eq 18
+          # 4. no personal tenant index appeared: the push is global, not per-user
+          count=$(curl -sf "$os/_cat/indices/.kibana*?h=index" | wc -l)
+          test "$count" -eq 1
+
+      - name: MCP handshake
+        run: |
+          set -euo pipefail
+          VELRUNA_CONF="$PWD/ci.conf" ./velruna add demo:api:port 8080 config
+          VELRUNA_CONF="$PWD/ci.conf" python3 hack/mcp_smoke.py
+
+      - name: Tear down
+        if: always()
+        run: docker compose -f docker/opensearch.yml --profile single --profile dashboards down -v
+
+  secure:
+    name: secured node + dashboards login
+    if: ${{ inputs.secure }}
+    runs-on: ubuntu-latest
+    env:
+      VELRUNA_SECURE_DEV_PASSWORD: "Smoke-Passw0rd-2026-ci"
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Build
+        run: make build
+
+      - name: Start the secured stack
+        run: |
+          set -euo pipefail
+          cat > secure.conf <<JSON
+          {
+            "opensearch_url": "https://127.0.0.1:9443",
+            "opensearch_user": "admin",
+            "opensearch_password": "$VELRUNA_SECURE_DEV_PASSWORD",
+            "insecure_skip_verify": true,
+            "allow_plaintext": true,
+            "index_name": "velruna"
+          }
+          JSON
+          docker compose -f docker/opensearch.yml --profile secure --profile secure-dash up -d
+          for _ in $(seq 1 80); do
+            curl -sf -o /dev/null --max-time 3 "http://127.0.0.1:$VELRUNA_DASH_SECURE_PORT/api/status" && break
+            sleep 3
+          done
+          curl -sf -o /dev/null "http://127.0.0.1:$VELRUNA_DASH_SECURE_PORT/api/status"
+          # The point of this job: security is really on. An anonymous call must
+          # be rejected, otherwise we would be testing the security-off stack.
+          code=$(curl -ks -o /dev/null -w '%{http_code}' "https://127.0.0.1:9443")
+          test "$code" = "401"
+
+      - name: Push and verify on the cluster
+        run: |
+          set -euo pipefail
+          ./velruna dashboards push --conf secure.conf
+          # Read through the CLUSTER, not through the UI API: with security on,
+          # a basic-auth call to the Dashboards API is served by the caller's
+          # PERSONAL tenant, so it reports zero objects even when the global
+          # tenant is fully populated. The .kibana write index is the global
+          # tenant's storage, and that is where the push writes.
+          curl -ksf -u "admin:$VELRUNA_SECURE_DEV_PASSWORD" \
+            "https://127.0.0.1:9443/.kibana/_doc/dashboard%3Avelruna-store-dashboard" |
+            grep -q '"found":true'
+          # Global, not personal: exactly one saved-objects index exists, so the
+          # push did not create a per-user tenant index.
+          count=$(curl -ksf -u "admin:$VELRUNA_SECURE_DEV_PASSWORD" \
+            "https://127.0.0.1:9443/_cat/indices/.kibana*?h=index" | wc -l)
+          test "$count" -eq 1
+          # The UI really requires a login.
+          code=$(curl -s -o /dev/null -w '%{http_code}' \
+            "http://127.0.0.1:$VELRUNA_DASH_SECURE_PORT/api/status")
+          test "$code" = "401"
+
+      - name: Tear down
+        if: always()
+        run: docker compose -f docker/opensearch.yml --profile secure --profile secure-dash down -v

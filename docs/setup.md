@@ -116,6 +116,65 @@ show (all loopback-bound, all torn down by `make dev-opensearch-down`):
   `opensearch_user: "admin"`, the password via keyring/env, and
   `insecure_skip_verify: true` for the demo certs.
 
+### Secured stack with Dashboards (the server-shaped recipe)
+
+The plain dev pair forces the security plugin off on both sides, which is right
+for a throwaway node and wrong for anything a team touches. For that there is a
+separate pair:
+
+```bash
+make dev-opensearch-secure-dashboards VELRUNA_SECURE_DEV_PASSWORD='<pw>'
+# UI: http://127.0.0.1:5643  (VELRUNA_DASH_SECURE_PORT to move it)
+# login: admin / <pw>
+```
+
+What changes compared to the dev pair: the node runs with the security plugin
+on (demo certificates, `https://127.0.0.1:9443`) and Dashboards logs in against
+it over https instead of bypassing auth. The demo certificates are why the
+stack sets `OPENSEARCH_SSL_VERIFICATIONMODE=none` internally — inside the
+compose network only.
+
+Pushing the dashboard bundle into that stack (the tenant behaviour is the real
+one here, not the security-off shortcut):
+
+```bash
+velruna dashboards push --conf <conf with opensearch_url: https://127.0.0.1:9443,
+                                  opensearch_user: admin,
+                                  insecure_skip_verify: true>
+```
+
+Then log into the UI and open the tenant switcher (avatar menu → Switch
+tenants); "Velruna — store overview" sits under **Global**, not under your
+personal tenant.
+
+Two details that surprise people on the secured stack:
+
+- the UI itself is plain **http** on `:5643` — TLS lives on the OpenSearch side
+  (`:9443`), and the login is what enforces access. Put a TLS proxy in front for
+  anything beyond localhost;
+- a **basic-auth** call to the Dashboards API is served from the caller's
+  *personal* tenant, so `api/saved_objects/_find` reports zero objects even when
+  the global tenant is fully populated. That is exactly why `dashboards push`
+  writes through the cluster (`.kibana` write index) instead of the API, and why
+  a scripted check reads the cluster, not the UI.
+
+### Deploying on a server
+
+The compose stack is a starting point, not a hardening guide. The knobs that
+matter when it leaves your laptop:
+
+| Knob | Default | Why |
+|---|---|---|
+| `VELRUNA_OS_HEAP` | `512m` | Java heap for each node; give a real node 2–4 GB before touching anything else |
+| `VELRUNA_CLUSTER_SEEDS` | the three node names | node discovery list for the `cluster` profile |
+| port bindings | `127.0.0.1:…` | the stack binds loopback on purpose; a server install changes the bind *and* puts real TLS in front (or uses the security plugin with real certificates) |
+| `index_replicas` (`velruna.conf`) | `-1` (auto) | lone node → 0, cluster → 1; set it explicitly if you want a different trade-off |
+| `OPENSEARCH_PASSWORD` | — | never in the image, never in the compose file; environment or keyring |
+
+Also on a server: replace the demo certificates, set `insecure_skip_verify:
+false` in `velruna.conf`, and point `opensearch_urls` at every node (the client
+round-robins, so one node restarting does not stall an agent).
+
 ### velruna itself in a container
 
 The image workflow (`.github/workflows/image.yml`) publishes

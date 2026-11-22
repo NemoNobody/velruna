@@ -18,7 +18,7 @@ services:
     environment:
       - discovery.type=single-node
       - DISABLE_SECURITY_PLUGIN=true
-      - OPENSEARCH_JAVA_OPTS=-Xms512m -Xmx512m
+      - OPENSEARCH_JAVA_OPTS=-Xms${VELRUNA_OS_HEAP:-512m} -Xmx${VELRUNA_OS_HEAP:-512m}
       # snapshots land in ./os-snapshots on the host (see docs/backup.md §5:
       # snapshot before `down`, containers lose anonymous data on prune)
       - OPENSEARCH_PATH_REPO=/snapshots
@@ -92,6 +92,31 @@ services:
     security_opt:
       - no-new-privileges:true
 
+  # --- Dashboards WITH security (make dev-opensearch-secure-dashboards) ---
+  # The dev dashboards service above forces the security plugin off, which is
+  # right for a throwaway node and wrong for a server install. This one talks to
+  # the secured node over https, logs in with the admin credentials and skips
+  # certificate verification because the node uses the demo certificates.
+  #   UI: https://127.0.0.1:5643  (VELRUNA_DASH_SECURE_PORT to move it)
+  #   login: admin / the password passed to make (VELRUNA_SECURE_DEV_PASSWORD)
+  dashboards-secure:
+    image: ${OSD_IMAGE:-opensearchproject/opensearch-dashboards:3.8.0}
+    container_name: velruna-opensearch-dashboards-secure
+    profiles: ["secure-dash"]
+    restart: unless-stopped
+    depends_on:
+      opensearch-secure:
+        condition: service_healthy
+    environment:
+      - 'OPENSEARCH_HOSTS=["https://opensearch-secure:9200"]'
+      - OPENSEARCH_USERNAME=${OPENSEARCH_USER:-admin}
+      - "OPENSEARCH_PASSWORD=${VELRUNA_SECURE_DEV_PASSWORD:-}"
+      # Demo certificates: verification off is the documented trade-off for a
+      # local stack. A real install uses real certificates and drops this.
+      - OPENSEARCH_SSL_VERIFICATIONMODE=none
+    ports:
+      - "127.0.0.1:${VELRUNA_DASH_SECURE_PORT:-5643}:5601"
+
   # --- 3-node cluster (make dev-opensearch-cluster) ---
   # Bare topology test: how velruna indices, their shards and replicas live
   # on a real cluster. Security stays off (test posture), all ports loopback.
@@ -104,10 +129,10 @@ services:
     environment: &cluster-env
       - cluster.name=velruna-cluster
       - node.name=opensearch-node1
-      - discovery.seed_hosts=opensearch-node1,opensearch-node2,opensearch-node3
+      - discovery.seed_hosts=${VELRUNA_CLUSTER_SEEDS:-opensearch-node1,opensearch-node2,opensearch-node3}
       - cluster.initial_cluster_manager_nodes=opensearch-node1,opensearch-node2,opensearch-node3
       - DISABLE_SECURITY_PLUGIN=true
-      - OPENSEARCH_JAVA_OPTS=-Xms512m -Xmx512m
+      - OPENSEARCH_JAVA_OPTS=-Xms${VELRUNA_OS_HEAP:-512m} -Xmx${VELRUNA_OS_HEAP:-512m}
       - OPENSEARCH_PATH_REPO=/snapshots
     volumes:
       - velruna-os-n1-data:/usr/share/opensearch/data
@@ -126,10 +151,10 @@ services:
     environment:
       - cluster.name=velruna-cluster
       - node.name=opensearch-node2
-      - discovery.seed_hosts=opensearch-node1,opensearch-node2,opensearch-node3
+      - discovery.seed_hosts=${VELRUNA_CLUSTER_SEEDS:-opensearch-node1,opensearch-node2,opensearch-node3}
       - cluster.initial_cluster_manager_nodes=opensearch-node1,opensearch-node2,opensearch-node3
       - DISABLE_SECURITY_PLUGIN=true
-      - OPENSEARCH_JAVA_OPTS=-Xms512m -Xmx512m
+      - OPENSEARCH_JAVA_OPTS=-Xms${VELRUNA_OS_HEAP:-512m} -Xmx${VELRUNA_OS_HEAP:-512m}
       - OPENSEARCH_PATH_REPO=/snapshots
     volumes:
       - velruna-os-n2-data:/usr/share/opensearch/data
@@ -143,10 +168,10 @@ services:
     environment:
       - cluster.name=velruna-cluster
       - node.name=opensearch-node3
-      - discovery.seed_hosts=opensearch-node1,opensearch-node2,opensearch-node3
+      - discovery.seed_hosts=${VELRUNA_CLUSTER_SEEDS:-opensearch-node1,opensearch-node2,opensearch-node3}
       - cluster.initial_cluster_manager_nodes=opensearch-node1,opensearch-node2,opensearch-node3
       - DISABLE_SECURITY_PLUGIN=true
-      - OPENSEARCH_JAVA_OPTS=-Xms512m -Xmx512m
+      - OPENSEARCH_JAVA_OPTS=-Xms${VELRUNA_OS_HEAP:-512m} -Xmx${VELRUNA_OS_HEAP:-512m}
       - OPENSEARCH_PATH_REPO=/snapshots
     volumes:
       - velruna-os-n3-data:/usr/share/opensearch/data
@@ -170,11 +195,15 @@ services:
       # the make target refuses to run without the password set (compose
       # interpolates the whole file, so no required-variable syntax here)
       - "OPENSEARCH_INITIAL_ADMIN_PASSWORD=${VELRUNA_SECURE_DEV_PASSWORD:-}"
-      - OPENSEARCH_JAVA_OPTS=-Xms512m -Xmx512m
+      - OPENSEARCH_JAVA_OPTS=-Xms${VELRUNA_OS_HEAP:-512m} -Xmx${VELRUNA_OS_HEAP:-512m}
     ports:
       - "127.0.0.1:9443:9200"
     healthcheck:
-      test: ["CMD-SHELL", "curl -sfk https://localhost:9200/_cluster/health | grep -q '\"status\"'"]
+      # The demo security config answers 401 without credentials, so the probe
+      # must log in: an unauthenticated curl -f made this node permanently
+      # unhealthy the moment anything depended on it. $$ escapes the compose
+      # interpolation and leaves $OPENSEARCH_INITIAL_ADMIN_PASSWORD to the shell.
+      test: ["CMD-SHELL", "curl -sk -u admin:$$OPENSEARCH_INITIAL_ADMIN_PASSWORD https://localhost:9200/_cluster/health | grep -q '\"status\"'"]
       interval: 10s
       timeout: 5s
       retries: 60
