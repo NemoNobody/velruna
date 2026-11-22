@@ -137,6 +137,10 @@ Or download the binary for your platform from
 cloned, `scripts/install.sh` picks it, verifies the sha256 and puts it in
 `~/.local/bin`.
 
+Or install the MCP bundle from [Releases](https://github.com/NemoNobody/velruna/releases)
+(`velruna-<version>.mcpb`): clients that speak the MCP Bundle format show a
+configuration form for the OpenSearch URL, user and password — no JSON editing.
+
 Or run the container (release tags only, `linux/amd64` + `linux/arm64`):
 
 ```

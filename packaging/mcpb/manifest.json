@@ -1,0 +1,82 @@
+{
+  "manifest_version": "0.3",
+  "name": "velruna",
+  "display_name": "velruna",
+  "version": "__VERSION__",
+  "description": "Verified-fact memory for AI agents: facts with source, date, author and edit history, kept in your own OpenSearch.",
+  "author": {
+    "name": "NemoNobody",
+    "url": "https://github.com/NemoNobody"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/NemoNobody/velruna"
+  },
+  "homepage": "https://github.com/NemoNobody/velruna",
+  "documentation": "https://github.com/NemoNobody/velruna/blob/master/docs/mcp.md",
+  "support": "https://github.com/NemoNobody/velruna/issues",
+  "license": "Apache-2.0",
+  "keywords": [
+    "memory",
+    "facts",
+    "opensearch",
+    "provenance",
+    "knowledge-base"
+  ],
+  "icon": "https://avatars.githubusercontent.com/u/5944801?v=4",
+  "server": {
+    "type": "binary",
+    "entry_point": "server/velruna-launch.sh",
+    "mcp_config": {
+      "command": "${__dirname}/server/velruna-launch.sh",
+      "args": [
+        "mcp"
+      ],
+      "env": {
+        "OPENSEARCH_URL": "${user_config.opensearch_url}",
+        "OPENSEARCH_USER": "${user_config.opensearch_user}",
+        "OPENSEARCH_PASSWORD": "${user_config.opensearch_password}",
+        "OPENSEARCH_INSECURE_SKIP_VERIFY": "${user_config.insecure_skip_verify}"
+      },
+      "platform_overrides": {
+        "win32": {
+          "command": "${__dirname}/server/velruna-windows-amd64.exe"
+        }
+      }
+    }
+  },
+  "compatibility": {
+    "platforms": [
+      "darwin",
+      "linux",
+      "win32"
+    ]
+  },
+  "user_config": {
+    "opensearch_url": {
+      "type": "string",
+      "title": "OpenSearch URL",
+      "description": "Address of the OpenSearch cluster velruna stores facts in, e.g. https://127.0.0.1:9200 . velruna does not embed a store: a single node is enough.",
+      "required": true
+    },
+    "opensearch_user": {
+      "type": "string",
+      "title": "OpenSearch user",
+      "description": "Basic-auth user for that cluster.",
+      "default": "admin"
+    },
+    "opensearch_password": {
+      "type": "string",
+      "title": "OpenSearch password",
+      "description": "Password for the OpenSearch user. Kept by the client, never written into the bundle.",
+      "sensitive": true,
+      "required": true
+    },
+    "insecure_skip_verify": {
+      "type": "boolean",
+      "title": "Skip TLS verification",
+      "description": "Accept self-signed certificates (OpenSearch's demo certificates). Leave off for a real certificate.",
+      "default": false
+    }
+  }
+}

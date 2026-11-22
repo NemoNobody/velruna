@@ -137,6 +137,24 @@ mounted config that carries it.
   (`nonroot`) — set `VELRUNA_AUTHOR` / `VELRUNA_HOST` to keep provenance
   readable for the other sessions reading the store.
 
+### Installing from the MCP bundle
+
+Each release also ships `velruna-<version>.mcpb` — the MCP Bundle format: a zip
+holding `manifest.json`, the five platform builds and a launcher. Clients that
+speak the format (Claude Desktop and others) install it from the file and show
+a configuration form instead of asking you to edit JSON:
+
+| Field | Goes to |
+|---|---|
+| OpenSearch URL (required) | `OPENSEARCH_URL` |
+| OpenSearch user (default `admin`) | `OPENSEARCH_USER` |
+| OpenSearch password (masked) | `OPENSEARCH_PASSWORD` |
+| Skip TLS verification (default off) | `OPENSEARCH_INSECURE_SKIP_VERIFY` |
+
+The server still needs a reachable OpenSearch — the bundle does not embed one.
+The same artifact is what the official MCP registry points at, so a client that
+resolves the registry entry downloads exactly this file.
+
 ## Tools
 
 | Tool | Purpose | Notes |

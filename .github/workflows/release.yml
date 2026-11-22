@@ -50,6 +50,19 @@ jobs:
               go build -trimpath -ldflags "$LDFLAGS" -o "$out" .
           done
           (cd dist && sha256sum * > checksums.txt)
+      # One .mcpb bundle carries every build: a client that speaks the format
+      # installs the server from a single file with a config dialog, and the
+      # official registry points at this artifact.
+      - name: Build MCPB bundle
+        env:
+          VERSION: ${{ inputs.version || github.ref_name }}
+        run: |
+          set -euo pipefail
+          semver="${VERSION#v}"
+          scripts/build-mcpb.sh "$semver" dist "dist/velruna-$semver.mcpb"
+          # Regenerate: the bundle is a release asset too, and checksums.txt
+          # is the file users verify against.
+          (cd dist && sha256sum * > checksums.txt)
       - name: Publish
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

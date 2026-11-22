@@ -14,7 +14,7 @@ BIN     ?= velruna
 CONTAINER ?= $(shell if command -v docker >/dev/null 2>&1; then echo "docker compose"; elif command -v podman-compose >/dev/null 2>&1; then echo "podman-compose"; else echo "podman compose"; fi)
 OSFILE := docker/opensearch.yml
 
-.PHONY: build test lint fmt vet ci install clean release dev-opensearch dev-opensearch-down dev-opensearch-logs dev-opensearch-dashboards dev-opensearch-cluster dev-opensearch-secure docker-build docker-smoke stack-up stack-down
+.PHONY: build test lint fmt vet ci install clean release dev-opensearch dev-opensearch-down dev-opensearch-logs dev-opensearch-dashboards dev-opensearch-cluster dev-opensearch-secure docker-build docker-smoke stack-up stack-down mcpb
 
 # Compose profiles in docker/opensearch.yml. `down` must name them all or
 # profiled services survive it.
@@ -144,6 +144,19 @@ stack-up:
 
 stack-down:
 	$(CONTAINER) -f $(OSFILE) $(OS_PROFILES) down
+
+# One MCPB bundle with every platform build, exactly what release.yml attaches
+# to a tag: manifest + launcher + 5 binaries. Useful to check the bundle by hand
+# (a desktop client can install it from the file).
+DIST ?= dist
+mcpb:
+	@set -e; rm -rf $(DIST); mkdir -p $(DIST); \
+	for t in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64; do \
+	  os=$${t%/*}; arch=$${t#*/}; out=$(DIST)/velruna-$$os-$$arch; \
+	  if [ "$$os" = windows ]; then out=$$out.exe; fi; \
+	  CGO_ENABLED=0 GOOS=$$os GOARCH=$$arch go build -trimpath -ldflags "$(LDFLAGS)" -o $$out .; \
+	done
+	scripts/build-mcpb.sh $(VERSION) $(DIST) $(DIST)/velruna-$(VERSION).mcpb
 
 # obscura: one-time installer for the opt-in render fallback (fetch_render=
 # obscura). Third-party binary, ~75MB, linux x86_64 glibc 2.35+; the sha256

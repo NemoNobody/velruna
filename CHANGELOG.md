@@ -6,6 +6,16 @@ under `## Unreleased`; the release commit moves that section under its version
 number (`.github/workflows/release.yml` reads the heading to build the release
 notes).
 
+## Unreleased
+
+### Added
+
+- MCP bundle (`.mcpb`): every release now attaches `velruna-<version>.mcpb`, a
+  single file a desktop client can install with a configuration dialog —
+  OpenSearch URL, user, password and the TLS-skip flag, no JSON editing. The
+  bundle carries all five platform builds plus a launcher that picks the right
+  one. `make mcpb` builds the same artifact locally.
+
 ## v0.8.10 — 2026-11-21
 
 ### Changed
