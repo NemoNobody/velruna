@@ -10,7 +10,6 @@ import (
 // records a re-confirmation of the same value (velruna_patch reverify): the
 // fact's observed_at moves and the writer joins confirmed_by, so the event (who,
 // when) belongs in the log. op=retire marks the entry written for a
-// look. op=retire marks the entry written for a
 // verified→obsolete transition, so "when and by whom was this retired" is a
 // query, not an inference from notes text. op=supersede records a
 // superseded_by link: a relation between records, not a value observation,

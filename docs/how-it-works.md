@@ -366,13 +366,16 @@ reader who lands on the dead key is sent to the live one.
 
 The field is a chain, not a graph, and the invariants make it walkable:
 
-- one outgoing link per fact — a link is set once and never repointed (a
-  `patch` with a different target is refused; a merge of three records is
-two links, written once each);
+- one outgoing link per fact — a later patch may repoint it (a successor can
+  itself be retired or merged again, so the chain must stay repairable), and
+  every repoint is its own `op=supersede` entry;
 - no self-reference and no cycles — the client walks the target's own chain
   (bounded) before accepting a link;
-- every fact on the chain must be `verified`: a reader sent through an obsolete
-  hop would land on a record the store itself says is dead;
+- every fact on the chain must be `verified` **at the time the link is
+  written**: a reader sent through an obsolete hop would land on a record the
+  store itself says is dead. A target retired later is visible in one `get`
+  (the link is not rewritten by the retirement) — repoint the link if the
+  successor died;
 - a link pointing back in time (a fact created later declaring an earlier
   successor — a key merged into a record that already existed) is legal, but
   its journal entry carries `marker=superseded-newer-with-older`, so a

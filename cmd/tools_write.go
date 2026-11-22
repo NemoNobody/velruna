@@ -279,7 +279,7 @@ type patchInput struct {
 	Reverify     bool     `json:"reverify,omitempty" jsonschema:"re-confirm the current value: observed_at moves to now, the journal gains op=rediscovery, the writer joins confirmed_by; cannot be combined with value/summary/status"`
 	TTLDays      int      `json:"ttl_days,omitempty" jsonschema:"retune the staleness window in days (bounded by the category cap: config/endpoint 14, location/behavior 30, recipe 180, rule 90; context_map uncapped); omitted = untouched; a qualifier touch, not journaled"`
 	Keywords     []string `json:"keywords,omitempty" jsonschema:"replaces the tag set when non-empty (same normalization as add: lowercase single tokens, max 10); a qualifier touch, not journaled — the tags appear in the history with the next accepted value"`
-	SupersededBy string   `json:"superseded_by,omitempty" jsonschema:"key of the fact that replaces this one (the successor to trust instead): set once, never repointed; the target must exist and be verified and the chain must stay cycle-free; journaled as op=supersede"`
+	SupersededBy string   `json:"superseded_by,omitempty" jsonschema:"key of the fact that replaces this one (the successor to trust instead): one link per fact, a later patch may repoint it; the target must exist and be verified and the chain must stay cycle-free; a link-only patch is journaled as op=supersede"`
 
 	// ConfirmSecret bypasses a guard hit at secret_guard=ask (see addInput).
 	ConfirmSecret bool `json:"confirm_secret,omitempty" jsonschema:"confirm a guard hit is a false positive (secret_guard=ask only); set only after the user approved the exact finding"`

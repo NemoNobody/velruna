@@ -151,8 +151,9 @@ func runMCPServer(confPath string) error {
 			"summary is CLEARED unless you pass a new one (a stale table of " +
 			"contents is a lie). superseded_by sets the successor link: the fact " +
 			"key that replaces this one, which a reader should trust instead " +
-			"(one link per fact, never repointed; the target must exist and be " +
-			"verified; cycles refused). The link is journaled as op=supersede.",
+			"(one link per fact; a later patch may repoint it; the target must " +
+			"exist and be verified; cycles refused). A link-only patch is " +
+			"journaled as op=supersede.",
 	}, s.patch)
 
 	mcp.AddTool(srv, &mcp.Tool{

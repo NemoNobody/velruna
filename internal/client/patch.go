@@ -30,8 +30,10 @@ type PatchFields struct {
 	TTLDays     int      // retunes the staleness window (bounded by the category cap); 0 = untouched
 	Keywords    []string // replaces the tag set when non-empty (tags are journaled with each accepted value)
 	// SupersededBy sets the successor link (see model.Fact.SupersededBy): one
-	// link per fact, target verified, no cycles. The link is journaled with
-	// op=supersede; the same value on an already-linked fact is a touch.
+	// link per fact, target verified, no cycles. A different target repoints
+	// the link (journaled: a successor can be retired or merged again, so the
+	// chain must stay repairable). The link is journaled with op=supersede;
+	// the same value on an already-linked fact is a touch.
 	SupersededBy string
 	// Reverify re-confirms the current value: observed_at moves to now, the
 	// journal gains an op=rediscovery entry, and the writer joins confirmed_by.
@@ -111,6 +113,9 @@ func ValidatePatchFields(p PatchFields) error {
 	if p.Reverify && (p.Value != "" || p.Summary != "" || p.Status != "") {
 		return fmt.Errorf("patch: reverify cannot be combined with a value, summary or status change (a new value is verified by its writer; a status transition is its own event)")
 	}
+	if p.Reverify && p.SupersededBy != "" {
+		return fmt.Errorf("patch: reverify cannot be combined with superseded_by (a re-confirmation and a successor link are different events)")
+	}
 	if p.TTLDays < 0 {
 		return fmt.Errorf("patch: ttl_days must be positive, got %d", p.TTLDays)
 	}
@@ -142,16 +147,13 @@ const maxSupersedeChain = 100
 // fact — allowed, but journaled with a marker).
 //
 // The invariants keep the link a chain a reader can follow to a trusted end:
-// one outgoing link per fact (a link is set once and never repointed), no
-// self-reference, no cycles, and every fact on the chain — the target and
-// whatever the target itself superseded — verified. A reader sent through an
-// obsolete hop would land on a record the store itself says is dead.
+// one outgoing link per fact (a repoint replaces it), no self-reference, no
+// cycles, and every fact on the chain — the target and whatever the target
+// itself superseded — verified. A reader sent through an obsolete hop would
+// land on a record the store itself says is dead.
 func (c *Client) checkSupersedeTarget(ctx context.Context, fact *model.Fact, targetKey string) (reversed bool, err error) {
 	if targetKey == fact.Key {
 		return false, contractErrorf("patch: fact %q cannot be superseded by itself", fact.Key)
-	}
-	if fact.SupersededBy != "" {
-		return false, contractErrorf("patch: fact %q is already superseded by %q: a link is set once (the chain is not repointed)", fact.Key, fact.SupersededBy)
 	}
 	seen := map[string]struct{}{fact.Key: {}}
 	cur := targetKey
@@ -201,10 +203,12 @@ func (c *Client) checkSupersedeTarget(ctx context.Context, fact *model.Fact, tar
 // dead fact alive IS a fresh verification, and a fact that resurrects while
 // staying stale would contradict its own staleness signal.
 //
-// SupersededBy is its own event: setting the link journals op=supersede
-// (never op=write — the value did not move, and churn counters must stay
-// truthful). Unlike notes or tags, the link does not touch observed_at: it
-// states a relation between records, not a re-observation of the fact.
+// SupersededBy is its own event: setting or repointing the link journals
+// op=supersede (never op=write — the value did not move, and churn counters
+// must stay truthful). A patch that also changes the value or retires the
+// fact keeps that event's op and its entry states the link. Unlike notes or
+// tags, the link does not touch observed_at: it states a relation between
+// records, not a re-observation of the fact.
 func (c *Client) Patch(ctx context.Context, key string, p PatchFields) (PatchResult, error) {
 	if err := ValidatePatchFields(p); err != nil {
 		return PatchResult{}, err

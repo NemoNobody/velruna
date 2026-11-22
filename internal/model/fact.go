@@ -74,13 +74,15 @@ type Fact struct {
 
 	// SupersededBy names the fact that replaces this one: the successor a
 	// reader should trust instead. One link per fact (records form a chain,
-	// not a graph): set by velruna_patch, never repointed, the target must be
-	// a verified fact, and cycles are refused. A link pointing BACK in time
-	// (a newer fact declares an older successor) is legal — a key may be
-	// merged into a record that already existed — but the journal flags it
-	// (model.MarkerNewerWithOlder), because a reversed claim deserves a second
-	// look. A value correction keeps the link: it is a relation between
-	// records, not part of the value.
+	// not a graph): set by velruna_patch, the target must be a verified fact,
+	// and cycles are refused. The link may be repointed (a later patch to a
+	// different target), and that event is journaled like the first one: a
+	// chain must stay repairable when a successor is retired or merged again.
+	// A link pointing BACK in time (a newer fact declares an older successor)
+	// is legal — a key may be merged into a record that already existed — but
+	// the journal flags it (model.MarkerNewerWithOlder), because a reversed
+	// claim deserves a second look. A value correction keeps the link: it is a
+	// relation between records, not part of the value.
 	SupersededBy string `json:"superseded_by,omitempty" yaml:"superseded_by,omitempty"`
 
 	// ConfirmedBy is who has verified that the CURRENT value is true, in order

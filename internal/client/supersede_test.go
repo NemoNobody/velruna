@@ -131,9 +131,6 @@ func TestPatchSupersededByRejectsBadTargets(t *testing.T) {
 		{"self reference", func(*supersedeStore) {}, "k", "by itself"},
 		{"missing target", func(*supersedeStore) {}, "ghost", "does not exist"},
 		{"obsolete target", func(*supersedeStore) {}, "dead", "is obsolete"},
-		{"repoint", func(s *supersedeStore) {
-			s.docs["k"] = factJSON("k", "verified", "2026-01-01T00:00:00Z", "new")
-		}, "other", "already superseded"},
 		{"cycle", func(s *supersedeStore) {
 			s.docs["new"] = factJSON("new", "verified", "2026-02-01T00:00:00Z", "k")
 		}, "new", "cycle"},
@@ -157,6 +154,48 @@ func TestPatchSupersededByRejectsBadTargets(t *testing.T) {
 				t.Error("a refused link must not journal")
 			}
 		})
+	}
+}
+
+func TestPatchSupersededByRepoints(t *testing.T) {
+	store := &supersedeStore{docs: map[string]string{
+		"k":     factJSON("k", "verified", "2026-01-01T00:00:00Z", "new"),
+		"new":   factJSON("new", "verified", "2026-02-01T00:00:00Z", ""),
+		"other": factJSON("other", "verified", "2026-02-01T00:00:00Z", ""),
+	}}
+	c, fake := supersedeClient(t, store)
+
+	res, err := c.Patch(context.Background(), "k", PatchFields{SupersededBy: "other"})
+	if err != nil {
+		t.Fatalf("Patch: %v", err)
+	}
+	if !res.Changed {
+		t.Error("Changed = false for a repoint; every link event is journaled")
+	}
+	appends := journalAppends(fake)
+	if len(appends) != 1 {
+		t.Fatalf("journal appends = %d, want 1", len(appends))
+	}
+	var je map[string]any
+	if err := json.Unmarshal([]byte(appends[0].Body), &je); err != nil {
+		t.Fatalf("journal body: %v", err)
+	}
+	if je["op"] != model.OpSupersede || je["superseded_by"] != "other" {
+		t.Errorf("journal op/superseded_by = %v/%v, want %q/other", je["op"], je["superseded_by"], model.OpSupersede)
+	}
+	params := patchParams(t, updateBody(fake))
+	if params["superseded_by"] != "other" {
+		t.Errorf("params.superseded_by = %v, want other (the link is replaced)", params["superseded_by"])
+	}
+}
+
+func TestPatchSupersededByReverifyRefused(t *testing.T) {
+	err := ValidatePatchFields(PatchFields{Reverify: true, SupersededBy: "new"})
+	if err == nil {
+		t.Fatal("ValidatePatchFields accepted reverify + superseded_by")
+	}
+	if !strings.Contains(err.Error(), "reverify") {
+		t.Errorf("error = %v, want it to name reverify", err)
 	}
 }
 

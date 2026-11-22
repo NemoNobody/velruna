@@ -365,6 +365,10 @@ func (c *Client) Add(ctx context.Context, f *model.Fact) (AddResult, error) {
 		// set", and the journaled snapshot must state what the doc will hold.
 		stated.Keywords = existing.Keywords
 	}
+	// The correction script leaves the successor link alone; the entry states
+	// the doc's link, not the request's empty field (a correction must not
+	// read as "this fact lost its successor").
+	stated.SupersededBy = existing.SupersededBy
 	entry := c.newJournalEntryFor(ctx, &stated, existing.FactID, f.ObservedAt)
 	ref := uuid.New().String()
 
