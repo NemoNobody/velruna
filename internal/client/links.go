@@ -115,11 +115,11 @@ func (c *Client) refuseRetireWithIncoming(ctx context.Context, key string) error
 // all three, but guards are advisory and older data predates them.
 
 const (
-	// linkScanDefault caps how many superseded_by edges one check walks.
-	linkScanDefault = 1000
-	// linkScanMax bounds what --limit may raise the cap to: the check must
+	// LinkScanDefault caps how many superseded_by edges one check walks.
+	LinkScanDefault = 1000
+	// LinkScanMax bounds what --limit may raise the cap to: the check must
 	// stay a bounded read even when asked generously.
-	linkScanMax = 10000
+	LinkScanMax = 10000
 	// maxResultWindow is the index.max_result_window the store ships with
 	// (buildIndexBody never raises it): a from+size beyond it is a raw 400,
 	// so the scan window must never exceed it.
@@ -141,6 +141,7 @@ type LinkFinding struct {
 // LinksReport is the outcome of one graph walk.
 type LinksReport struct {
 	Edges     int // edges inspected
+	Fetched   int // hits the scan returned (audited + unreadable)
 	Total     int // edges in the store (exact: track_total_hits)
 	Skipped   int // fetched hits we could not read as an edge
 	Truncated bool
@@ -151,10 +152,10 @@ type LinksReport struct {
 // every broken edge. limit bounds the scan (0 selects the default).
 func (c *Client) CheckLinks(ctx context.Context, limit int) (*LinksReport, error) {
 	if limit <= 0 {
-		limit = linkScanDefault
+		limit = LinkScanDefault
 	}
-	if limit > linkScanMax {
-		limit = linkScanMax
+	if limit > LinkScanMax {
+		limit = LinkScanMax
 	}
 	// The +1 probe for "is there more" must not breach the result window:
 	// beyond it the store answers a raw 400. Truncation is judged from the
@@ -215,7 +216,7 @@ func (c *Client) CheckLinks(ctx context.Context, limit int) (*LinksReport, error
 		}
 		edges = append(edges, edge{key: doc.Key, target: doc.SupersededBy})
 	}
-	report := &LinksReport{Total: resp.Hits.Total.Value, Skipped: skipped}
+	report := &LinksReport{Total: resp.Hits.Total.Value, Fetched: len(resp.Hits.Hits), Skipped: skipped}
 	if len(edges) > limit {
 		edges = edges[:limit]
 	}

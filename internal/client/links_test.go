@@ -261,7 +261,7 @@ func TestCheckLinksAtLimitMaxStaysUnderTheWindow(t *testing.T) {
 		"b": factJSON("b", "verified", "2026-01-01T00:00:00Z", ""),
 	}}
 	c, _ := supersedeClient(t, store)
-	rep, err := c.CheckLinks(context.Background(), linkScanMax)
+	rep, err := c.CheckLinks(context.Background(), LinkScanMax)
 	if err != nil {
 		t.Fatalf("CheckLinks at --limit max (fake enforces the result window): %v", err)
 	}

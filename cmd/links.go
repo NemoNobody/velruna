@@ -7,6 +7,7 @@ import (
 	"os"
 	"strconv"
 
+	"github.com/NemoNobody/velruna/internal/client"
 	"github.com/spf13/cobra"
 )
 
@@ -34,8 +35,9 @@ func linksCheckCmd() *cobra.Command {
   cycle       the edge is part of a superseded_by loop
 
 The scan is bounded (--limit, default 1000, max 10000 edges); a truncated
-scan says so. Exit codes distinguish outcomes: 0 when the graph is clean,
-1 when findings exist, 2 when the check itself failed (unreachable store) —
+scan says so. Exit codes distinguish outcomes: 0 when no findings exist
+(the summary line says when the graph was not fully audited), 1 when
+findings exist, 2 when the check itself failed (unreachable store) —
 scripts can branch on them without parsing stderr. Repair a finding by
 repointing the source (velruna_patch superseded_by) or retiring it too.
 Run it occasionally; the write guards prevent most breaks but never all
@@ -51,49 +53,61 @@ of them.`,
 			if err != nil {
 				fatalCheckFailed(err)
 			}
-			fmt.Printf("links: %d edge(s) inspected", rep.Edges)
-			if rep.Skipped > 0 {
-				fmt.Printf(", %d hit(s) carried a superseded_by this client cannot read (not audited)", rep.Skipped)
-			}
-			// Only hits the store counted but the scan did not return are
-			// recoverable by --limit; unreadable hits were fetched already,
-			// and telling the operator to raise the limit for them is wrong
-			// advice (cf. fetch/journal, which treat skipped the same way).
-			if missed := rep.Total - rep.Edges - rep.Skipped; missed > 0 {
-				effectiveLimit := limit
-				if effectiveLimit <= 0 {
-					effectiveLimit = 1000
-				}
-				if effectiveLimit < 10000 {
-					fmt.Printf(", %d edge(s) in the store not fetched (raise --limit)", missed)
-				} else {
-					fmt.Printf(", %d edge(s) in the store not fetched (--limit is at its 10000 cap)", missed)
-				}
-			}
-			fmt.Println()
+			fmt.Println(linksSummaryLine(rep, limit))
 			for _, f := range rep.Findings {
 				fmt.Printf("%-10s %s -> %s: %s\n", f.Problem,
 					strconv.Quote(f.Key), strconv.Quote(f.Target), f.Detail)
 			}
+			// The verdict distinguishes "fully audited, clean" from "nothing
+			// broken among what was audited"; findings exit 1 so scripts can
+			// branch without parsing stdout.
+			fmt.Println(linksVerdict(rep))
 			if len(rep.Findings) > 0 {
-				fmt.Println("repair: velruna_patch {key, superseded_by: <live verified target>} to repoint, " +
-					"or retire the source as well")
 				os.Exit(1)
-			}
-			// "clean" may only be claimed for a fully audited graph: with
-			// unaudited edges (skipped or not fetched) the honest answer is
-			// "nothing broken among what was audited", never a promise about
-			// the rest.
-			switch {
-			case rep.Skipped > 0 || rep.Truncated:
-				fmt.Println("no broken edges among the audited links; the graph was NOT fully audited (see the counts above)")
-			default:
-				fmt.Println("clean: every superseded_by link resolves to a verified fact")
 			}
 		},
 	}
-	cmd.Flags().IntVar(&limit, "limit", 0, "max edges to inspect (default 1000, max 10000)")
+	cmd.Flags().IntVar(&limit, "limit", 0,
+		fmt.Sprintf("max edges to inspect (default %d, max %d)", client.LinkScanDefault, client.LinkScanMax))
 	return cmd
+}
+
+// linksSummaryLine is the pure formatting of the scan accounting, kept out
+// of the Run closure so the honest-counts contract is pinned by tests.
+func linksSummaryLine(rep *client.LinksReport, limit int) string {
+	line := fmt.Sprintf("links: %d edge(s) inspected", rep.Edges)
+	if rep.Skipped > 0 {
+		line += fmt.Sprintf(", %d hit(s) carried a superseded_by this client cannot read (not audited)", rep.Skipped)
+	}
+	// Only hits the store counted but the scan never returned are
+	// recoverable by --limit; unreadable hits were fetched already, and
+	// telling the operator to raise the limit for them is wrong advice
+	// (cf. fetch/journal, which treat skipped the same way).
+	if missed := rep.Total - rep.Fetched; missed > 0 {
+		effectiveLimit := limit
+		if effectiveLimit <= 0 {
+			effectiveLimit = client.LinkScanDefault
+		}
+		if effectiveLimit < client.LinkScanMax {
+			line += fmt.Sprintf(", %d edge(s) in the store not fetched (raise --limit)", missed)
+		} else {
+			line += fmt.Sprintf(", %d edge(s) in the store not fetched (--limit is at its %d cap)",
+				missed, client.LinkScanMax)
+		}
+	}
+	return line
+}
+
+// linksVerdict is the closing line: "clean" only for a fully audited graph.
+func linksVerdict(rep *client.LinksReport) string {
+	if len(rep.Findings) > 0 {
+		return "repair: velruna_patch {key, superseded_by: <live verified target>} to repoint, " +
+			"or retire the source as well"
+	}
+	if rep.Skipped > 0 || rep.Truncated {
+		return "no broken edges among the audited links; the graph was NOT fully audited (see the counts above)"
+	}
+	return "clean: every superseded_by link resolves to a verified fact"
 }
 
 // fatalCheckFailed separates "the audit could not run" (exit 2) from "the

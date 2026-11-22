@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"sort"
 	"strings"
 	"testing"
 
@@ -109,17 +110,28 @@ func (s *supersedeStore) linkSearch(body string) (int, string) {
 		if len(req.Sort) == 0 {
 			return http.StatusBadRequest, `{"error":"scan must sort deterministically"}`
 		}
+	} else {
+		// The retire guard's probe states its total as fact in the refusal,
+		// so it must pin the total exactly like the scan does.
+		guardProbe := false
+		for _, f := range filters {
+			if _, ok := f.Term["superseded_by"]; ok {
+				guardProbe = true
+			}
+		}
+		if guardProbe && !req.TrackTotalHits {
+			return http.StatusBadRequest, `{"error":"link probe must pin the total"}`
+		}
 	}
 
-	var hits []string
-	total := 0
-	for key, src := range s.docs {
+	var matched []string
+	for key := range s.docs {
 		var view struct {
 			Key          string          `json:"key"`
 			Status       string          `json:"status"`
 			SupersededBy json.RawMessage `json:"superseded_by"`
 		}
-		if err := json.Unmarshal([]byte(src), &view); err != nil {
+		if err := json.Unmarshal([]byte(s.docs[key]), &view); err != nil {
 			continue
 		}
 		match := true
@@ -137,13 +149,23 @@ func (s *supersedeStore) linkSearch(body string) (int, string) {
 				}
 			}
 		}
-		if !match {
-			continue
+		if match {
+			matched = append(matched, key)
 		}
-		total++
+	}
+	// The scan pins key-asc; the fake must hand out the SAME window the
+	// store would, or a test pinning window membership would flake
+	// against map-iteration order.
+	sort.Strings(matched)
+	var hits []string
+	for _, key := range matched {
 		if req.Size > 0 && len(hits) >= req.Size {
 			continue
 		}
+		var view struct {
+			SupersededBy json.RawMessage `json:"superseded_by"`
+		}
+		_ = json.Unmarshal([]byte(s.docs[key]), &view)
 		q, _ := json.Marshal(key)
 		source := `{"key":` + string(q)
 		if len(view.SupersededBy) > 0 {
@@ -152,7 +174,7 @@ func (s *supersedeStore) linkSearch(body string) (int, string) {
 		source += `}`
 		hits = append(hits, `{"_source":`+source+`}`)
 	}
-	return http.StatusOK, `{"hits":{"total":{"value":` + fmt.Sprint(total) + `},"hits":[` + strings.Join(hits, ",") + `]}}`
+	return http.StatusOK, `{"hits":{"total":{"value":` + fmt.Sprint(len(matched)) + `},"hits":[` + strings.Join(hits, ",") + `]}}`
 }
 
 // linkClause is one leaf query the fake understands: a term on the indexed
@@ -188,7 +210,9 @@ func matchClause(cl linkClause, key, status string, superseded json.RawMessage) 
 	for _, field := range cl.Exists {
 		switch field {
 		case "superseded_by":
-			if len(superseded) == 0 || string(superseded) == "null" {
+			// An empty array indexes no values, so `exists` matches nothing
+			// (same as a missing or null field in the real store).
+			if len(superseded) == 0 || string(superseded) == "null" || string(superseded) == "[]" {
 				return false
 			}
 		default:
@@ -204,6 +228,10 @@ func matchClause(cl linkClause, key, status string, superseded json.RawMessage) 
 // the retire guard, and an array carrying "" really is excluded by must_not
 // term superseded_by:"".
 func termMatches(raw json.RawMessage, want string) bool {
+	if string(raw) == "null" {
+		// A null indexes no values: no term matches it.
+		return false
+	}
 	var scalar string
 	if err := json.Unmarshal(raw, &scalar); err == nil {
 		return scalar == want
