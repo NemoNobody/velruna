@@ -188,7 +188,7 @@ func TestBundleObjectsResolveAgainstTheCurrentSchema(t *testing.T) {
 			// A vis with several distinct pattern refs would make the
 			// empty-meta.index fallback below (and the "its own pattern"
 			// reading) arbitrary — skip the field checks, one clear error.
-			t.Errorf("visualization %s carries %d index-pattern refs; the fallback pattern would be ambiguous", o.ID, patternRefs)
+			t.Errorf("visualization %s carries %d distinct index-pattern refs; the fallback pattern would be ambiguous", o.ID, patternRefs)
 			continue
 		}
 		if title == "" {

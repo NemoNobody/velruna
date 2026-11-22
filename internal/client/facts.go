@@ -63,9 +63,10 @@ type AddResult struct {
 	PreviousSummary string
 	// Resurrected: the fact was obsolete and this write re-declared it
 	// alive (status back to verified, observed_at moved, the event is
-	// journaled). Without it a same-value resurrect reads as a value
-	// correction (changed=true), and a correction over an obsolete fact
-	// hides the status transition entirely.
+	// journaled — except on a lagged journal append, where the lag error
+	// says the entry did not land). Without it a same-value resurrect reads
+	// as a value correction (changed=true), and a correction over an
+	// obsolete fact hides the status transition entirely.
 	Resurrected bool
 }
 
@@ -91,13 +92,15 @@ func redactionsForFields(rows []model.Redaction, fields ...string) []model.Redac
 }
 
 // Add stores a fact under its key. Three cases: the key is new (created, then
-// journaled and linked); the value is unchanged (only notes/source/status
-// move — observed_at must not, the observation is old and only the qualifier
-// is new, and the journal is untouched; the exception is a dead fact: an
-// unchanged re-add of an obsolete fact is a fresh verification, journaled
-// like the Patch resurrect, and observed_at moves); the value changed (the
-// doc is corrected with a preallocated current_ref, then the journal entry
-// is appended under it — this also resurrects an obsolete fact).
+// journaled and linked); the value is unchanged (notes/source/status move,
+// plus the given qualifiers — category always, ttl_days/keywords when
+// non-empty — while observed_at must not, the observation is old and only the
+// qualifier is new, and the journal is untouched; the exception is a dead
+// fact: an unchanged re-add of an obsolete fact is a fresh verification,
+// journaled like the Patch resurrect, and observed_at moves); the value
+// changed (the doc is corrected with a preallocated current_ref, then the
+// journal entry is appended under it — this also resurrects an obsolete
+// fact).
 //
 // The main write precedes the journal append (doc-first): a failed main
 // write means nothing was accepted and the answer can say so truthfully;
@@ -161,8 +164,9 @@ func (c *Client) Add(ctx context.Context, f *model.Fact) (AddResult, error) {
 			return AddResult{}, err
 		}
 		if created {
-			// Journal the birth value under a deterministic id (the same
-			// contract as corrections and the migration), then link the fact
+			// Journal the birth value under a deterministic id (the migration
+			// re-appends under the same id; corrections instead preallocate a
+			// fresh uuid — see newJournalEntryFor), then link the fact
 			// to it. A journal failure leaves the fact in the pre-journal
 			// shape (migrate-history catches it), not a broken fact. A link
 			// failure (a blackout between the append and the link) is also

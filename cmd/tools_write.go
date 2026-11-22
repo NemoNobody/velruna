@@ -156,7 +156,10 @@ func (s *mcpServer) addOne(ctx context.Context, cfg *config.Config, c *client.Cl
 		// cannot surface the flags — go-sdk discards the typed output when the
 		// handler returns an error, so the honest state travels in the error
 		// text — but velruna_add_batch copies these flags into its per-item
-		// output next to item.Error, where they are visible. Do not "simplify"
+		// output next to item.Error, where they are visible (the per-item
+		// flags are Created/Changed only: on a lagged resurrect or a
+		// correction over an obsolete fact, the transition is named by
+		// item.Error's wording, not by a flag). Do not "simplify"
 		// this away: the batch answer would silently zero what did store.
 		if res.Created || res.Changed {
 			return addOutput{Key: in.Key, Created: res.Created, Changed: res.Changed, Status: f.Status, Redactions: redactions}, writeFailure("velruna_add", err)

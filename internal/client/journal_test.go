@@ -615,9 +615,12 @@ func TestUUIDAppendCollisionIsNotSuccess(t *testing.T) {
 		}
 		return http.StatusInternalServerError, `{"status":500,"error":"unexpected ` + r.Method + " " + r.Path + `"}`
 	})
-	_, err := c.Add(context.Background(), model.NewFact("k", "new", "config", "p", "s", ""))
+	res, err := c.Add(context.Background(), model.NewFact("k", "new", "config", "p", "s", ""))
 	if err == nil || !strings.Contains(err.Error(), "journal entry lagged") || !strings.Contains(err.Error(), "journal append") {
 		t.Fatalf("a 409 over a fresh uuid ref must report the lagged entry, got: %v", err)
+	}
+	if !res.Changed || res.Resurrected {
+		t.Errorf("res = %+v, want Changed=true Resurrected=false (the fixture is verified, not obsolete)", res)
 	}
 	// The 409 branch must have actually run: an append DOC request was
 	// sent and rejected (not the pipeline _settings PUT, not a
@@ -661,6 +664,9 @@ func TestResurrectAppendCollisionIsNotSuccess(t *testing.T) {
 	}
 	if !res.Changed {
 		t.Errorf("res.Changed = false, want true (the resurrect itself landed): %v", err)
+	}
+	if !res.Resurrected {
+		t.Errorf("res.Resurrected = false, want true (the doc is verified again even though the entry lagged): %v", err)
 	}
 	fake.mu.Lock()
 	var sawAppend bool
