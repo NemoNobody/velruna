@@ -373,6 +373,75 @@ func TestCredsRmByName(t *testing.T) {
 	}
 }
 
+// --name beats the config's recorded name: cleaning an orphan must not
+// touch the live store's entry — the whole point of the explicit label.
+func TestCredsRmByNameBeatsRecorded(t *testing.T) {
+	credsTestEnv(t)
+	stored := fakeKeyringCmd(t)
+	stored["velruna/cluster/lab"] = "orphan pw"
+	stored["velruna/cluster/live"] = "live pw"
+
+	conf := os.Getenv("VELRUNA_CONF")
+	if err := os.WriteFile(conf, []byte(`{"opensearch_url":"http://127.0.0.1:9","opensearch_cluster":"live"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	cmd := CredsCmd()
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetArgs([]string{"rm", "--name", "lab"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("creds rm --name: %v", err)
+	}
+	if _, ok := stored["velruna/cluster/lab"]; ok {
+		t.Error("the named orphan must be removed")
+	}
+	if _, ok := stored["velruna/cluster/live"]; !ok {
+		t.Errorf("the config's own entry must survive: %v", stored)
+	}
+}
+
+// "the store is silent" and "the store rejected the password" are different
+// verdicts: only the first may fall back to the recorded-name reuse, the
+// second must stop the write (the rejected password cannot work in the
+// runtime either). 403 sits on the silent side: a valid user without
+// cluster-info rights gets a permission refusal, not a credential refusal.
+func TestProbeRejectedPassword(t *testing.T) {
+	auth := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = w.Write([]byte(`{"error":{"type":"security_exception","reason":"unable to authenticate user"},"status":401}`))
+	}))
+	defer auth.Close()
+	forbidden := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusForbidden)
+		_, _ = w.Write([]byte(`{"error":{"type":"permission_denied_exception","reason":"no cluster rights"},"status":403}`))
+	}))
+	defer forbidden.Close()
+
+	if _, err := probeClusterUUID(auth.URL, nil, "bad pw"); err == nil {
+		t.Fatal("a 401 answer must fail the probe")
+	} else if !probeRejectedPassword(err) {
+		t.Errorf("a 401 must read as a rejected password: %v", err)
+	}
+
+	if _, err := probeClusterUUID(forbidden.URL, nil, "pw"); err == nil {
+		t.Fatal("a 403 answer must fail the probe")
+	} else if probeRejectedPassword(err) {
+		t.Errorf("a 403 is a permission refusal, not a rejected password: %v", err)
+	}
+
+	dead := httptest.NewServer(http.NotFoundHandler())
+	deadURL := dead.URL
+	dead.Close()
+	if _, err := probeClusterUUID(deadURL, nil, "pw"); err == nil {
+		t.Fatal("an unreachable store must fail the probe")
+	} else if probeRejectedPassword(err) {
+		t.Errorf("silence is not a rejection: %v", err)
+	}
+}
+
 // The secret never leaves the keyring through the CLI: 'creds get' was removed
 // precisely so no caller can print the password, and stdout of the remaining
 // subcommands must stay secret-free.

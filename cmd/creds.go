@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"net/url"
 	"os"
 	"strings"
@@ -15,6 +16,7 @@ import (
 	"github.com/NemoNobody/velruna/internal/config"
 	"github.com/NemoNobody/velruna/internal/keyring"
 
+	"github.com/opensearch-project/opensearch-go/v4"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 )
@@ -123,7 +125,9 @@ same name in the config file as opensearch_cluster. A node can then be
 replaced, moved to another port or dropped from opensearch_urls without the
 password going missing. --name records an explicit label instead. When nothing
 answers at the configured endpoint, the entry falls back to the legacy
-host[:port] account and the output says so.`,
+host[:port] account and the output says so. When the store answers but rejects
+the password (HTTP 401), nothing is stored: a credential the store itself
+refuses cannot work in the runtime either.`,
 		Args: cobra.NoArgs,
 		Run: func(cmd *cobra.Command, args []string) {
 			out, errOut := cmd.OutOrStdout(), cmd.ErrOrStderr()
@@ -144,6 +148,15 @@ host[:port] account and the output says so.`,
 			if cluster == "" {
 				uuid, perr := probeClusterUUID(target, cfg, pw)
 				if perr != nil {
+					if probeRejectedPassword(perr) {
+						// The store ANSWERED and refused this credential (401).
+						// Storing it — especially over the named entry the runtime
+						// reads first — would swap a working credential for one
+						// the runtime cannot use, and "stored:" would be a lie.
+						fatalErr(fmt.Errorf("the store at %s rejected the new password (HTTP 401): "+
+							"nothing stored — the runtime authenticates the same way; re-run with the right password",
+							config.RedactURL(target)))
+					}
 					if recorded := recordedClusterName(cfg); recorded != "" {
 						// The config already names this store (a previous
 						// successful set). Reuse that name: the runtime reads
@@ -190,6 +203,30 @@ host[:port] account and the output says so.`,
 	return set
 }
 
+// probeRejectedPassword reports whether a probe failure means the store
+// ANSWERED and refused the credential itself (HTTP 401). Silence, timeouts
+// and permission refusals (403: a valid user without cluster-info rights —
+// the password may be perfectly fine) are not rejections.
+func probeRejectedPassword(err error) bool {
+	var se *opensearch.StructError
+	if errors.As(err, &se) && se.Status == http.StatusUnauthorized {
+		return true
+	}
+	var ste *opensearch.StringError
+	if errors.As(err, &ste) && ste.Status == http.StatusUnauthorized {
+		return true
+	}
+	var me *opensearch.MessageError
+	if errors.As(err, &me) && me.Status == "401" {
+		return true
+	}
+	var re *opensearch.ReasonError
+	if errors.As(err, &re) && re.Status == "401" {
+		return true
+	}
+	return false
+}
+
 // probeClusterUUID asks the store who it is, authenticating with the password
 // being stored: the cluster name keys the new entry, so the answer has to come
 // from a request that can already succeed with that credential.
@@ -212,7 +249,20 @@ func probeClusterUUID(target string, base *config.Config, pw string) (string, er
 	if err != nil {
 		return "", err
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	// One deadline covers the transport's failover across every node: a
+	// black-holed node (a firewall that never answers) must not burn the
+	// whole budget before a live node is tried, so the budget scales with
+	// the node list.
+	budget := 15 * time.Second
+	if n := len(pc.OpenSearchURLs); n > 1 {
+		if scaled := time.Duration(n) * 10 * time.Second; scaled > budget {
+			budget = scaled
+		}
+		if budget > 90*time.Second {
+			budget = 90 * time.Second
+		}
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), budget)
 	defer cancel()
 	info, err := c.Info(ctx)
 	if err != nil {

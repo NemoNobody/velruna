@@ -35,8 +35,10 @@ notes).
   store to another host or port keeps the same credentials. The uuid is
   discovered at `creds set`; a rotation while the store is silent reuses the
   name the config already records instead of stranding the password under a
-  host account; `creds rm --name` cleans entries the config no longer names;
-  legacy host-named entries stay readable.
+  host account, while a store that answers and rejects the new password
+  (HTTP 401) aborts the write rather than replacing a working entry with a
+  credential the runtime cannot use; `creds rm --name` cleans entries the
+  config no longer names; legacy host-named entries stay readable.
 - MCP bundle (`.mcpb`): every release now attaches a universal
   `velruna-<version>.mcpb` plus per-OS `-darwin`, `-linux` and `-windows`
   bundles. A desktop client installs one with a configuration dialog —
