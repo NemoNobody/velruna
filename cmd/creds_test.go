@@ -2,8 +2,11 @@ package cmd
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -53,6 +56,8 @@ func credsTestEnv(t *testing.T) {
 	}
 	t.Setenv("VELRUNA_CONF", conf)
 	t.Setenv("OPENSEARCH_PASSWORD", "")
+	t.Setenv("OPENSEARCH_CLUSTER", "")
+	t.Setenv("OPENSEARCH_USER", "")
 }
 
 // withStdin replaces os.Stdin with a piped file for the duration of fn.
@@ -74,7 +79,10 @@ func withStdin(t *testing.T, content string, fn func()) {
 	fn()
 }
 
-func TestCredsSetPipedAndRm(t *testing.T) {
+// TestCredsSetFallsBackToLegacyHostWhenStoreSilent: an unreachable store
+// cannot confirm its cluster_uuid, so the entry is keyed by host — and the
+// operator is told that happened, not left to discover it later.
+func TestCredsSetFallsBackToLegacyHostWhenStoreSilent(t *testing.T) {
 	credsTestEnv(t)
 	stored := fakeKeyringCmd(t)
 
@@ -83,26 +91,30 @@ func TestCredsSetPipedAndRm(t *testing.T) {
 	cmd.SetOut(&out)
 	cmd.SetErr(&out)
 	withStdin(t, "sekret pw\n", func() {
-		cmd.SetArgs([]string{"set", "--url", "https://os.test:9200"})
+		// Port 1 answers instantly with ECONNREFUSED: the probe fails fast.
+		cmd.SetArgs([]string{"set", "--url", "http://127.0.0.1:1"})
 		if err := cmd.Execute(); err != nil {
 			t.Fatalf("creds set: %v", err)
 		}
 	})
-	if got := out.String(); !strings.Contains(got, "account=os.test:9200") {
+	if got := out.String(); !strings.Contains(got, "account=127.0.0.1:1") {
 		t.Errorf("set output: %q", got)
 	}
-	if stored["velruna/os.test:9200"] != "sekret pw" {
+	if !strings.Contains(out.String(), "legacy account") {
+		t.Errorf("the silent-store fallback must be reported:\n%s", out.String())
+	}
+	if stored["velruna/127.0.0.1:1"] != "sekret pw" {
 		t.Errorf("keyring after set: %v", stored)
 	}
 
 	out.Reset()
 	cmd = CredsCmd()
 	cmd.SetOut(&out)
-	cmd.SetArgs([]string{"rm", "--url", "https://os.test:9200"})
+	cmd.SetArgs([]string{"rm", "--url", "http://127.0.0.1:1"})
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("creds rm: %v", err)
 	}
-	if _, ok := stored["velruna/os.test:9200"]; ok {
+	if _, ok := stored["velruna/127.0.0.1:1"]; ok {
 		t.Error("entry survived rm")
 	}
 	if !strings.Contains(out.String(), "removed") {
@@ -113,12 +125,155 @@ func TestCredsSetPipedAndRm(t *testing.T) {
 	out.Reset()
 	cmd = CredsCmd()
 	cmd.SetOut(&out)
-	cmd.SetArgs([]string{"rm", "--url", "https://os.test:9200"})
+	cmd.SetArgs([]string{"rm", "--url", "http://127.0.0.1:1"})
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("creds rm (absent): %v", err)
 	}
 	if !strings.Contains(out.String(), "no entry") {
 		t.Errorf("rm absent output: %q", out.String())
+	}
+}
+
+// The entry is keyed by the store's identity: 'set' asks the cluster its
+// cluster_uuid, stores under account "cluster/<uuid>" and records the same
+// name in the config file, so the node list can change without orphaning the
+// password.
+func TestCredsSetNamesClusterAndRecordsConfig(t *testing.T) {
+	credsTestEnv(t)
+	stored := fakeKeyringCmd(t)
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/" {
+			http.Error(w, `{"error":"unexpected path `+r.URL.Path+`"}`, http.StatusBadRequest)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"cluster_name":"t","cluster_uuid":"AbCd123","version":{"number":"3.8.0"}}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	conf := os.Getenv("VELRUNA_CONF")
+	body, _ := json.Marshal(map[string]string{"opensearch_url": srv.URL, "opensearch_user": "u"})
+	if err := os.WriteFile(conf, body, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	cmd := CredsCmd()
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	withStdin(t, "cluster pw\n", func() {
+		cmd.SetArgs([]string{"set"})
+		if err := cmd.Execute(); err != nil {
+			t.Fatalf("creds set: %v", err)
+		}
+	})
+	if stored["velruna/cluster/AbCd123"] != "cluster pw" {
+		t.Errorf("keyring after set: %v", stored)
+	}
+	if got := out.String(); !strings.Contains(got, "account=cluster/AbCd123") {
+		t.Errorf("set output: %q", got)
+	}
+	if !strings.Contains(out.String(), "opensearch_cluster=AbCd123 recorded") {
+		t.Errorf("the config must record the cluster name:\n%s", out.String())
+	}
+
+	data, err := os.ReadFile(conf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var doc map[string]any
+	if err := json.Unmarshal(data, &doc); err != nil {
+		t.Fatalf("config after set does not parse: %v", err)
+	}
+	if doc["opensearch_cluster"] != "AbCd123" || doc["opensearch_url"] != srv.URL {
+		t.Errorf("config rewritten wrong: %s", data)
+	}
+}
+
+// --name labels the entry without probing, and a --url override must not
+// rewrite the config's identity (it belongs to another endpoint).
+func TestCredsSetNameFlagAndUrlOverride(t *testing.T) {
+	credsTestEnv(t)
+	stored := fakeKeyringCmd(t)
+
+	cmd := CredsCmd()
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	withStdin(t, "labeled pw\n", func() {
+		cmd.SetArgs([]string{"set", "--url", "http://127.0.0.1:1", "--name", "lab"})
+		if err := cmd.Execute(); err != nil {
+			t.Fatalf("creds set --name: %v", err)
+		}
+	})
+	if stored["velruna/cluster/lab"] != "labeled pw" {
+		t.Errorf("keyring after set --name: %v", stored)
+	}
+	if !strings.Contains(out.String(), "--url does not touch the config") {
+		t.Errorf("--url must not write the config identity silently:\n%s", out.String())
+	}
+	data, err := os.ReadFile(os.Getenv("VELRUNA_CONF"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), "opensearch_cluster") {
+		t.Errorf("--url rewrote the config identity: %s", data)
+	}
+}
+
+// rm removes the entry the configuration resolves to; --legacy also clears the
+// host entry the migration to cluster naming left behind.
+func TestCredsRmClusterAndLegacy(t *testing.T) {
+	credsTestEnv(t)
+	stored := fakeKeyringCmd(t)
+	stored["velruna/cluster/uuid-1"] = "cluster pw"
+	stored["velruna/127.0.0.1:1"] = "legacy pw"
+
+	conf := os.Getenv("VELRUNA_CONF")
+	if err := os.WriteFile(conf, []byte(`{"opensearch_url":"http://127.0.0.1:1","opensearch_cluster":"uuid-1"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	cmd := CredsCmd()
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetArgs([]string{"rm"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("creds rm: %v", err)
+	}
+	if _, ok := stored["velruna/cluster/uuid-1"]; ok {
+		t.Error("cluster entry survived rm")
+	}
+	if _, ok := stored["velruna/127.0.0.1:1"]; !ok {
+		t.Errorf("rm must not clear the legacy entry without --legacy: %v", stored)
+	}
+
+	out.Reset()
+	cmd = CredsCmd()
+	cmd.SetOut(&out)
+	cmd.SetArgs([]string{"rm", "--legacy"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("creds rm --legacy: %v", err)
+	}
+	if _, ok := stored["velruna/127.0.0.1:1"]; ok {
+		t.Error("--legacy must clear the legacy entry")
+	}
+	if !strings.Contains(out.String(), "no entry") {
+		t.Errorf("rm --legacy output: %q", out.String())
+	}
+}
+
+// The secret never leaves the keyring through the CLI: 'creds get' was removed
+// precisely so no caller can print the password, and stdout of the remaining
+// subcommands must stay secret-free.
+func TestCredsGetIsGone(t *testing.T) {
+	credsTestEnv(t)
+	fakeKeyringCmd(t)
+	for _, sub := range CredsCmd().Commands() {
+		if sub.Name() == "get" {
+			t.Fatal("'creds get' must not exist: the password is read back through the keyring, never printed")
+		}
 	}
 }
 
@@ -152,7 +307,7 @@ func TestCredsRefuseUserinfo(t *testing.T) {
 		t.Errorf("accountFor echoes the password on parse failure: %q", got)
 	}
 
-	// credsTarget (used by set and rm) refuses the userinfo flag.
+	// credsTarget (used by rm) refuses the userinfo flag.
 	old := credsFlags.url
 	t.Cleanup(func() { credsFlags.url = old })
 	credsFlags.url = "https://admin:hunter2@os.test:9200"
@@ -193,11 +348,24 @@ func TestCredsSetEmptyPasswordAborts(t *testing.T) {
 
 func TestRenderCredsStatus(t *testing.T) {
 	cfg := config.DefaultConfig()
-
-	// keyring present, resolving.
+	cfg.OpenSearchCluster = "uuid-1"
 	cfg.PasswordSource = "keyring"
-	text := renderCredsStatus("os.test:9200", cfg, nil, "secret-service")
-	for _, want := range []string{"account: velruna/os.test:9200", "source: keyring", "entry present"} {
+	cfg.KeyringAccount = "cluster/uuid-1"
+	probes := []accountProbe{
+		{account: "cluster/uuid-1", kind: "cluster"},
+		{account: "os.test:9200", kind: "legacy", err: keyring.ErrNotFound},
+	}
+
+	// cluster entry present, legacy absent: both are listed, the present one is
+	// what resolves.
+	text := renderCredsStatus(cfg, probes, "secret-service")
+	for _, want := range []string{
+		"velruna/cluster/uuid-1 (cluster, entry present)",
+		"velruna/os.test:9200 (legacy, no entry)",
+		"source: keyring (cluster/uuid-1)",
+		"entry present (value not shown)",
+		"backend: secret-service",
+	} {
 		if !strings.Contains(text, want) {
 			t.Errorf("text lacks %q:\n%s", want, text)
 		}
@@ -206,13 +374,13 @@ func TestRenderCredsStatus(t *testing.T) {
 		t.Error("the status renderer has no access to values by design")
 	}
 
-	// keyring empty, file plaintext refused.
+	// Nothing stored, plaintext refused: the migration hint appears.
 	cfg = config.DefaultConfig()
 	cfg.PasswordSource = "none"
 	cfg.FileHasPlaintext = true
 	cfg.AllowPlaintext = false
-	text = renderCredsStatus("os.test:9200", cfg, errors.New("no session bus"), "")
-	for _, want := range []string{"REFUSED", "no session bus", "hint:"} {
+	text = renderCredsStatus(cfg, []accountProbe{{account: "os.test:9200", kind: "legacy", err: keyring.ErrNotFound}}, "")
+	for _, want := range []string{"REFUSED", "no entry — store one", "hint:"} {
 		if !strings.Contains(text, want) {
 			t.Errorf("text lacks %q:\n%s", want, text)
 		}
@@ -221,7 +389,7 @@ func TestRenderCredsStatus(t *testing.T) {
 	// --url overrides the endpoint: the config's password source belongs to a
 	// different host, so it must not be shown, and the config-file section
 	// (plaintext status, migration hint) is about the configured host too.
-	text = renderCredsStatus("os.test:9200", nil, nil, "")
+	text = renderCredsStatus(nil, []accountProbe{{account: "os.test:9200", kind: "legacy"}}, "")
 	for _, want := range []string{"source: n/a (--url", "entry present"} {
 		if !strings.Contains(text, want) {
 			t.Errorf("nil-config text lacks %q:\n%s", want, text)
@@ -235,10 +403,10 @@ func TestRenderCredsStatus(t *testing.T) {
 
 	// A refused backend names its own fix: the container hint must not be
 	// appended, or it would contradict the reason on a desktop with the wrong
-	// provider. The active backend is printed when one is reachable.
+	// provider.
 	cfg = config.DefaultConfig()
 	cfg.PasswordSource = "none"
-	text = renderCredsStatus("os.test:9200", cfg, fmt.Errorf("%w: gnome-keyring on KDE", keyring.ErrBackend), "")
+	text = renderCredsStatus(cfg, []accountProbe{{account: "os.test:9200", kind: "legacy", err: fmt.Errorf("%w: gnome-keyring on KDE", keyring.ErrBackend)}}, "")
 	if !strings.Contains(text, "gnome-keyring on KDE") {
 		t.Errorf("refusal reason missing:\n%s", text)
 	}
@@ -246,59 +414,25 @@ func TestRenderCredsStatus(t *testing.T) {
 		t.Errorf("an ErrBackend refusal must not carry the container hint:\n%s", text)
 	}
 
-	text = renderCredsStatus("os.test:9200", cfg, nil, "kwallet-native")
-	if !strings.Contains(text, "backend: kwallet-native") {
-		t.Errorf("active backend not named:\n%s", text)
+	// A provider outage that is not a backend verdict (no bus at all) does get
+	// the container hint.
+	text = renderCredsStatus(cfg, []accountProbe{{account: "os.test:9200", kind: "legacy", err: errors.New("no session bus")}}, "")
+	if !strings.Contains(text, "no session bus in containers/ssh") {
+		t.Errorf("non-backend outage should carry the container hint:\n%s", text)
 	}
 
 	// A refused backend must not be paired with "velruna creds set": neither the
 	// hint nor the plaintext-migration line may point at a store that cannot be
-	// written to until the backend is fixed. The plaintext branch only prints
-	// when the file actually carries a password, so both paths are exercised.
+	// written to until the backend is fixed.
 	cfg = config.DefaultConfig()
 	cfg.PasswordSource = "none"
 	cfg.FileHasPlaintext = true
 	cfg.AllowPlaintext = false
-	text = renderCredsStatus("os.test:9200", cfg, fmt.Errorf("%w: no owner", keyring.ErrBackend), "")
+	text = renderCredsStatus(cfg, []accountProbe{{account: "os.test:9200", kind: "legacy", err: fmt.Errorf("%w: no owner", keyring.ErrBackend)}}, "")
 	if strings.Contains(text, "velruna creds set") {
 		t.Errorf("refused backend still advertises 'creds set':\n%s", text)
 	}
 	if !strings.Contains(text, "fix the keyring backend") {
 		t.Errorf("refused backend hint missing:\n%s", text)
-	}
-}
-
-// creds get pipes the resolved password to stdout (scripted curl, dashboard
-// push). Env resolves first; --url reads only the keyring entry for that host.
-func TestCredsGetPicksEnvAndKeyring(t *testing.T) {
-	credsTestEnv(t)
-	stored := fakeKeyringCmd(t)
-	stored["velruna/os.test:9200"] = "wallet pw"
-
-	t.Setenv("OPENSEARCH_PASSWORD", "env pw")
-	cmd := CredsCmd()
-	var out bytes.Buffer
-	cmd.SetOut(&out)
-	cmd.SetErr(&out)
-	cmd.SetArgs([]string{"get"})
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("creds get (env): %v", err)
-	}
-	if out.String() != "env pw\n" {
-		t.Errorf("get stdout = %q, want the env value plus newline", out.String())
-	}
-
-	// --url bypasses the effective config's password (different endpoint)
-	// and serves the keyring entry for the named host; env must not leak here.
-	out.Reset()
-	cmd = CredsCmd()
-	cmd.SetOut(&out)
-	cmd.SetErr(&out)
-	cmd.SetArgs([]string{"get", "--url", "https://os.test:9200"})
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("creds get (--url): %v", err)
-	}
-	if out.String() != "wallet pw\n" {
-		t.Errorf("get --url stdout = %q, want the keyring value", out.String())
 	}
 }

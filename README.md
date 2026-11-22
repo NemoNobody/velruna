@@ -209,9 +209,12 @@ options (`velruna fetch`): `VELRUNA_DOCS_INDEX`, `VELRUNA_DOCS_TTL_DAYS`,
 `VELRUNA_REPO_SCAN_DEPTH`.
 
 The password resolves from `OPENSEARCH_PASSWORD`, then the OS keyring (service
-`velruna`, account `host[:port]`), then the config file — the file only when
+`velruna`, account `cluster/<opensearch_cluster>` — with the legacy
+`host[:port]` entry still readable), then the config file — the file only when
 `allow_plaintext` is on. `velruna creds set` reads a hidden prompt (the password
-is never taken from argv). Check the connection:
+is never taken from argv) and keys the entry by the store's own identity (its
+`cluster_uuid`), so replacing a node or reordering the node list never orphans
+the secret. No `creds` subcommand prints the value. Check the connection:
 
 ```
 velruna status
@@ -269,7 +272,7 @@ the 2 MB `fetch_max_bytes` limit is refused with an error, not trimmed.
 | `velruna migrate-history [--project <p>] [--yes]` | Move pre-journal in-doc history arrays into the journal (one-time; plan first, `--yes` to write) |
 | `velruna obsolete <key> [reason] [--allow-secret]` | Mark a fact obsolete because its subject is gone (reason appended to notes) |
 | `velruna status [--conf <path>]` | Check connectivity and show the effective configuration (env overrides are listed by name, never values) |
-| `velruna creds set\|get\|status\|rm [--url <u>]` | Manage the OpenSearch password in the OS keyring: `set` reads a hidden prompt (piped stdin for scripts), `get` prints the stored password (for scripts that need it), `status` shows only the source (`env\|keyring\|file\|none`), `rm` deletes the entry |
+| `velruna creds set\|status\|rm [--url <u>]` | Manage the OpenSearch password in the OS keyring: `set` reads a hidden prompt (piped stdin for scripts) and keys the entry by store identity — `cluster/<cluster_uuid>` (or `--name <label>`), recorded in the config as `opensearch_cluster`; `status` shows the candidate entries and the source, never a value; `rm [--legacy]` deletes |
 | `velruna fetch <url> [--refresh] [-p <p>] [--allow-secret] [--max-chars N] [--block-chars N]` | Fetch a page into the docs index and print its outline: cache-aware, blocks are read on demand; `--max-chars 0` stores the whole document (default `fetch_doc_chars`), `--block-chars` sets the target block size; github URLs that match a local clone print the file path |
 | `velruna doc <hash> [n\|--section N] [--blocks N] [--full]` | Read a stored document: the outline (default), block `n`, `--blocks N` consecutive blocks, or every block with `--full` (answers are capped at 32000 runes; `next` names the next block; one block is always returned whole even when it alone exceeds the cap) |
 | `velruna docs <query> [--limit N] [-p <p>]` | BM25 search over stored documents (the extracted blocks, never the raw page) |

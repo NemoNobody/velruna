@@ -24,6 +24,7 @@ var statusEnvVars = []string{
 	"OPENSEARCH_URLS",
 	"OPENSEARCH_USER",
 	"OPENSEARCH_PASSWORD",
+	"OPENSEARCH_CLUSTER",
 	"OPENSEARCH_INSECURE_SKIP_VERIFY",
 	"VELRUNA_INDEX",
 	"VELRUNA_HISTORY_LIMIT",
@@ -90,6 +91,8 @@ type statusReport struct {
 	Author             string               `json:"author,omitempty" jsonschema:"effective author label stamped on new facts (self-reported: security | config | os chain); empty when nothing resolves"`
 	AuthorSource       string               `json:"author_source,omitempty" jsonschema:"which chain link named the author: security | config | os | none"`
 	PasswordFrom       string               `json:"password_from,omitempty" jsonschema:"where the OpenSearch password resolves from: env | keyring | file | none; the value is never shown"`
+	PasswordAccount    string               `json:"password_account,omitempty" jsonschema:"keyring entry that supplied the password: cluster/<name> or the legacy host[:port]; present only when it resolves from the keyring"`
+	StoreName          string               `json:"store_name,omitempty" jsonschema:"opensearch_cluster: the identity the keyring entry is keyed by; absent when unset (the entry follows the first node's host)"`
 	PermWarning        string               `json:"perm_warning,omitempty" jsonschema:"plaintext password in a group/world-readable config file: the user should chmod 600 it"`
 	KeyringError       string               `json:"keyring_error,omitempty" jsonschema:"keyring provider failure (not 'entry not found'): a bus/wallet outage, not a missing entry"`
 	ConfigFile         string               `json:"config_file" jsonschema:"config file actually used, empty when none was found"`
@@ -215,6 +218,8 @@ func collectStatus(ctx context.Context, confPath string, noCWD bool) statusRepor
 		UserAgent:       cfg.FetchUserAgent,
 	}
 	rep.PasswordFrom = cfg.PasswordSource
+	rep.PasswordAccount = cfg.KeyringAccount
+	rep.StoreName = cfg.OpenSearchCluster
 	rep.KeyringError = cfg.KeyringError
 	rep.PermWarning = permWarning(cfg, rep.ConfigFile)
 	rep.Author, rep.AuthorSource = cfg.Author, "config"
@@ -379,6 +384,10 @@ func printStatus(w io.Writer, rep statusReport) error {
 	}
 	b.WriteString("\nindex: ")
 	b.WriteString(rep.Index)
+	if rep.StoreName != "" {
+		b.WriteString("\nstore name: ")
+		b.WriteString(rep.StoreName)
+	}
 	b.WriteString("\nhistory_index_period: ")
 	b.WriteString(rep.HistoryIndexPeriod)
 	b.WriteString("\nhistory_limit: ")
@@ -438,6 +447,11 @@ func printStatus(w io.Writer, rep statusReport) error {
 	}
 	b.WriteString("\npassword: ")
 	b.WriteString(rep.PasswordFrom)
+	if rep.PasswordAccount != "" {
+		b.WriteString(" (account ")
+		b.WriteString(rep.PasswordAccount)
+		b.WriteString(")")
+	}
 	if rep.KeyringError != "" {
 		b.WriteString(" (keyring outage: ")
 		b.WriteString(rep.KeyringError)

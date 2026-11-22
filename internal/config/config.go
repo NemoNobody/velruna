@@ -58,11 +58,18 @@ type Config struct {
 	// over them, so one dead node costs a retry, not an outage, and no proxy is
 	// needed to reach a multi-node cluster. Empty means "just OpenSearchURL".
 	// Credentials and TLS settings are shared: one user, one store.
-	OpenSearchURLs     []string `json:"opensearch_urls,omitempty"`
-	OpenSearchUser     string   `json:"opensearch_user"`
-	OpenSearchPassword string   `json:"opensearch_password"`
-	InsecureSkipVerify bool     `json:"insecure_skip_verify"`
-	IndexName          string   `json:"index_name"`
+	OpenSearchURLs []string `json:"opensearch_urls,omitempty"`
+	// OpenSearchCluster names the store for the keyring: the password entry
+	// lives under the account "cluster/<name>", so replacing a node, changing
+	// its port or reordering opensearch_urls never orphans the secret. The
+	// value is an identity, not connection material — `creds set` fills it in
+	// with the cluster_uuid the store reports, and any human label works too.
+	// Empty means "fall back to the legacy host[:port] account".
+	OpenSearchCluster  string `json:"opensearch_cluster,omitempty"`
+	OpenSearchUser     string `json:"opensearch_user"`
+	OpenSearchPassword string `json:"opensearch_password"`
+	InsecureSkipVerify bool   `json:"insecure_skip_verify"`
+	IndexName          string `json:"index_name"`
 
 	// HistoryLimit is the default keep-N for `prune`. It no longer trims on
 	// write: corrections append to the journal index without a bound
@@ -204,6 +211,11 @@ type Config struct {
 	// credentials resolve without echoing anything secret.
 	PasswordSource string `json:"-"`
 
+	// KeyringAccount names which keyring entry supplied the password
+	// ("cluster/<name>" or the legacy host[:port]): runtime-only, like
+	// PasswordSource, so status can say where the credential came from.
+	KeyringAccount string `json:"-"`
+
 	// KeyringError carries a keyring provider failure (bus down, wallet
 	// closed) that is NOT "entry not found". Surfacing it keeps a keyring
 	// outage from degrading silently into "no password".
@@ -221,7 +233,8 @@ type Config struct {
 }
 
 // KeyringService is the service name under which OpenSearch credentials live
-// in the OS keyring; the account is the host[:port] of the effective URL.
+// in the OS keyring. The account names the store: "cluster/<opensearch_cluster>",
+// with the legacy host[:port] entry kept readable (see KeyringAccounts).
 const KeyringService = "velruna"
 
 // DefaultConfig returns the default configuration.
@@ -281,7 +294,8 @@ func LoadConfig() (*Config, error) {
 //  4. ~/.velruna.conf
 //
 // Env vars override the file: OPENSEARCH_URL, OPENSEARCH_URLS, OPENSEARCH_USER,
-// OPENSEARCH_PASSWORD, OPENSEARCH_INSECURE_SKIP_VERIFY, VELRUNA_INDEX,
+// OPENSEARCH_PASSWORD, OPENSEARCH_CLUSTER, OPENSEARCH_INSECURE_SKIP_VERIFY,
+// VELRUNA_INDEX,
 // VELRUNA_HISTORY_LIMIT, VELRUNA_HISTORY_PERIOD, VELRUNA_SUMMARY_MIN_LEN,
 // VELRUNA_SUMMARY_MAX_LEN, VELRUNA_SECRET_GUARD, VELRUNA_ALLOW_PLAINTEXT,
 // VELRUNA_AUTHOR, VELRUNA_MODEL, VELRUNA_HOST, VELRUNA_SESSION,
@@ -332,6 +346,9 @@ func loadConfig(explicitPath string, finder func() string) (*Config, error) {
 			return nil, fmt.Errorf("OPENSEARCH_URLS is set but has no entries: list node addresses or unset it")
 		}
 		cfg.OpenSearchURLs = list
+	}
+	if v := os.Getenv("OPENSEARCH_CLUSTER"); v != "" {
+		cfg.OpenSearchCluster = strings.TrimSpace(v)
 	}
 	if user := os.Getenv("OPENSEARCH_USER"); user != "" {
 		cfg.OpenSearchUser = user
@@ -627,14 +644,19 @@ func resolvePassword(cfg *Config) {
 		cfg.PasswordSource = "env"
 		return
 	}
-	if pw, err := keyring.Get(KeyringService, KeyringAccount(cfg.EffectiveURLs()[0])); err == nil && pw != "" {
-		cfg.OpenSearchPassword = pw
-		cfg.PasswordSource = "keyring"
-		return
-	} else if err != nil && !errors.Is(err, keyring.ErrNotFound) {
-		// Provider outage, not a missing entry: record it so status surfaces
-		// the outage instead of blaming the user's config.
-		cfg.KeyringError = err.Error()
+	for _, account := range KeyringAccounts(cfg) {
+		pw, err := keyring.Get(KeyringService, account)
+		if err == nil && pw != "" {
+			cfg.OpenSearchPassword = pw
+			cfg.PasswordSource = "keyring"
+			cfg.KeyringAccount = account
+			return
+		}
+		if err != nil && !errors.Is(err, keyring.ErrNotFound) {
+			// Provider outage, not a missing entry: record it so status surfaces
+			// the outage instead of blaming the user's config.
+			cfg.KeyringError = err.Error()
+		}
 	}
 	if cfg.FileHasPlaintext && cfg.AllowPlaintext {
 		cfg.PasswordSource = "file"
@@ -721,6 +743,30 @@ func KeyringAccount(rawURL string) string {
 	return host
 }
 
+// ClusterAccount is the keyring account for a named store: the cluster entry
+// that survives node churn. The name is opensearch_cluster (a cluster_uuid by
+// default), never a host, so the entry stays findable when the endpoints move.
+func ClusterAccount(name string) string {
+	return "cluster/" + strings.TrimSpace(name)
+}
+
+// KeyringAccounts lists the accounts a password may live under, most specific
+// first: the cluster entry when opensearch_cluster names the store, then the
+// legacy host[:port] entry that predates cluster naming. The legacy entry is
+// read forever on purpose — a store configured before cluster naming must keep
+// working without anyone re-entering a password — but it is never written by a
+// cluster-named 'creds set' unless the store could not be probed.
+func KeyringAccounts(cfg *Config) []string {
+	out := make([]string, 0, 2)
+	if name := strings.TrimSpace(cfg.OpenSearchCluster); name != "" {
+		out = append(out, ClusterAccount(name))
+	}
+	if host := KeyringAccount(cfg.EffectiveURLs()[0]); host != "" {
+		out = append(out, host)
+	}
+	return out
+}
+
 // fileConfig mirrors Config for JSON decoding. Fields are optional: a missing
 // key must leave the default in place. InsecureSkipVerify is a *bool so that
 // "absent" (keep the default false: TLS verification stays ON) is
@@ -728,6 +774,7 @@ func KeyringAccount(rawURL string) string {
 type fileConfig struct {
 	OpenSearchURL       string   `json:"opensearch_url"`
 	OpenSearchURLs      []string `json:"opensearch_urls"`
+	OpenSearchCluster   string   `json:"opensearch_cluster"`
 	OpenSearchUser      string   `json:"opensearch_user"`
 	OpenSearchPassword  string   `json:"opensearch_password"`
 	InsecureSkipVerify  *bool    `json:"insecure_skip_verify"`
@@ -805,6 +852,9 @@ func loadFile(cfg *Config, path string) error {
 	}
 	if len(c.OpenSearchURLs) > 0 {
 		cfg.OpenSearchURLs = c.OpenSearchURLs
+	}
+	if c.OpenSearchCluster != "" {
+		cfg.OpenSearchCluster = strings.TrimSpace(c.OpenSearchCluster)
 	}
 	if c.OpenSearchUser != "" {
 		cfg.OpenSearchUser = c.OpenSearchUser

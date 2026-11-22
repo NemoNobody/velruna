@@ -11,14 +11,13 @@ Usage (from the repo root):
     python3 docker/dashboards/gen_fields.py [path-to-velruna.conf]
 
 The cluster URL/user come from OPENSEARCH_URL/OPENSEARCH_USER, else the config
-file (default ./velruna.conf); the password resolves via `velruna creds get` /
-OPENSEARCH_PASSWORD. Never prints the password.
+file (default ./velruna.conf); the password comes from OPENSEARCH_PASSWORD.
+Never prints the password.
 """
 import base64
 import json
 import os
 import ssl
-import subprocess
 import sys
 import urllib.request
 
@@ -108,12 +107,8 @@ def main():
     user = (os.environ.get("OPENSEARCH_USER") or os.environ.get("VELRUNA_OS_USER")
             or conf.get("opensearch_user", "admin"))
     pw = os.environ.get("OPENSEARCH_PASSWORD")
-    if not pw:
-        velruna = os.environ.get("VELRUNA_BIN") or "velruna"
-        pw = subprocess.run([velruna, "creds", "get"],
-                            capture_output=True, text=True, check=False).stdout.strip()
     if not url or not pw:
-        sys.exit("cluster url/password unresolved (config + creds get or env)")
+        sys.exit("cluster url/password unresolved (config + OPENSEARCH_PASSWORD)")
 
     ctx = ssl._create_unverified_context()
 

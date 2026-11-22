@@ -294,8 +294,12 @@ in front:
 - `OPENSEARCH_URLS` (comma-separated) overrides the file list; `opensearch_url`
   stays valid for a single node and is used when the list is empty.
 - Credentials and TLS settings are shared by every node — one user, one store.
-  The keyring account is derived from the **first** address, so keep that node
-  first if you reorder the list.
+  The keyring entry is keyed by the **store**, not by one node: `creds set`
+  records it as `cluster/<cluster_uuid>` and writes the same value into the
+  config as `opensearch_cluster`, so reordering or replacing addresses never
+  orphans the password. A store configured before cluster naming keeps working:
+  the legacy `host[:port]` entry (derived from the **first** address) is still
+  read.
 - Each entry gets the same validation as `opensearch_url` (no user info in the
   URL, host required); one bad entry fails the config load with its index.
 - `velruna status` prints the whole list (`urls`) and the MCP `velruna_status`
@@ -304,10 +308,15 @@ in front:
 - Leave `opensearch_password` out of the file: store the password in the OS
   keyring with `velruna creds set` (run it in a terminal — it prompts for the
   password; the password is never an argument, so it never ends up in shell
-  history). Resolution order: `OPENSEARCH_PASSWORD` env → keyring → file.
+  history). `set` asks the store its `cluster_uuid` and keys the entry by it
+  (`cluster/<uuid>`, plus `opensearch_cluster` in the config); `--name <label>`
+  uses a label of your own instead. Resolution order: `OPENSEARCH_PASSWORD` env
+  → keyring (cluster entry, then the legacy host entry) → file.
   A plaintext password in the file is only read when `allow_plaintext: true`
   (off by default). Containers and ssh sessions have no keyring — export
-  `OPENSEARCH_PASSWORD` there.
+  `OPENSEARCH_PASSWORD` there. Nothing in `creds` prints the password back:
+  scripted callers pass it through their own environment, tooling reads it
+  through the keyring.
 - **Keyring by desktop.** On Linux the keyring path is the freedesktop Secret
   Service (`org.freedesktop.secrets` over D-Bus), so any desktop that provides
   one works without DE-specific code:
@@ -452,10 +461,12 @@ status: OK
 ```
 
 `password:` shows where the password resolves from (`env`, `keyring`, `file`,
-`none`); the value is never printed. `velruna creds status` shows the same
-plus the keyring state. `author:` is the label stamped on new writes and
-which chain link produced it (`security` / `config` / `os`); it is absent
-when nothing resolves.
+`none`) and, for the keyring, which entry answered (`cluster/<name>` or the
+legacy host); the value is never printed. `store name:` lists
+`opensearch_cluster` when it is set. `velruna creds status` shows the same
+plus every candidate entry and the keyring state. `author:` is the label
+stamped on new writes and which chain link produced it (`security` /
+`config` / `os`); it is absent when nothing resolves.
 
 If OpenSearch is unreachable, `status` prints `NOT AVAILABLE` with the reason and
 a hint, and exits non-zero. If any environment variable is overriding the file,
@@ -757,8 +768,9 @@ set their own tool timeouts).
   the rule is still the first line of defense.
 - The OpenSearch password lives in the OS keyring (`velruna creds set`), not in
   the config file: `allow_plaintext` is off by default, so a file password is
-  refused. `velruna creds status` shows the source; neither command prints the
-  value.
+  refused. The entry is keyed by the store's `cluster_uuid`, so it survives
+  node changes. `velruna creds status` shows the source and the candidate
+  entries; no `creds` command prints the value.
 - Change the default `admin` password before the cluster is reachable by anyone else.
 - The facts index is the accumulated memory — back it up (snapshot API; recipe:
   [docs/backup.md](backup.md)). Snapshots are plaintext, like the store.
