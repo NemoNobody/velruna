@@ -129,7 +129,7 @@ func AddCmd() *cobra.Command {
 	cmd.Flags().StringVarP(&addFlags.notes, "notes", "n", "",
 		"qualifiers: what was checked, how far, caveats")
 	cmd.Flags().StringVar(&addFlags.summary, "summary", "",
-		"short table-of-contents rendering of the value (under summary_max_len chars); required when the value is longer than summary_min_len; ignored when the value is unchanged (same-value re-add touches notes/source only)")
+		"short table-of-contents rendering of the value (under summary_max_len chars); required when the value is longer than summary_min_len; ignored when the value is unchanged (a same-value re-add moves notes/source when given, category always, ttl_days/keywords when given)")
 	cmd.Flags().IntVar(&addFlags.ttlDays, "ttl-days", 0,
 		"optional staleness window in days; may only shorten the category default (config/endpoint 14, location/behavior 30, recipe 180, rule 90; context_map uncapped)")
 	cmd.Flags().StringSliceVar(&addFlags.keywords, "keyword", nil,

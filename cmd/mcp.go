@@ -113,7 +113,9 @@ func runMCPServer(confPath string) error {
 		Description: "Store a verified fact: file locations, config and endpoint " +
 			"values, behavior. Re-use the same key to correct a fact — the fact " +
 			"is updated to point at a preallocated journal-entry id (doc-first), " +
-			"then the entry is appended under it. Re-adding the same value is a " +
+			"then the entry is appended under it (over an obsolete fact a " +
+			"changed value resurrects it too: status back to verified, " +
+			"observed_at moves). Re-adding the same value is a " +
 			"touch: no journal entry, observed_at stays (staleness keeps aging — " +
 			"a re-read is not a re-verification), notes/source move when supplied " +
 			"(plus category always, and ttl_days/keywords when given), updated_by " +

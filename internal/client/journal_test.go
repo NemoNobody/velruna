@@ -619,6 +619,11 @@ func TestUUIDAppendCollisionIsNotSuccess(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "journal entry lagged") || !strings.Contains(err.Error(), "journal append") {
 		t.Fatalf("a 409 over a fresh uuid ref must report the lagged entry, got: %v", err)
 	}
+	// The verified fixture must NOT claim a resurrection: at the MCP error
+	// edge the text is the only surface, so the wording itself is pinned.
+	if strings.Contains(err.Error(), "resurrect") {
+		t.Errorf("a correction over a verified fact must not name a resurrection: %v", err)
+	}
 	if !res.Changed || res.Resurrected {
 		t.Errorf("res = %+v, want Changed=true Resurrected=false (the fixture is verified, not obsolete)", res)
 	}
@@ -642,7 +647,7 @@ func TestUUIDAppendCollisionIsNotSuccess(t *testing.T) {
 // append lags, the typed answer is discarded at the MCP error edge, so
 // the error text itself must name the resurrection.
 func TestCorrectionOverObsoleteLagNamesResurrection(t *testing.T) {
-	c, _ := newFakeClient(t, func(r recordedRequest) (int, string) {
+	c, fake := newFakeClient(t, func(r recordedRequest) (int, string) {
 		if code, body := journalInfraOK(r); code != http.StatusInternalServerError {
 			return code, body
 		}
@@ -657,11 +662,24 @@ func TestCorrectionOverObsoleteLagNamesResurrection(t *testing.T) {
 		return http.StatusInternalServerError, `{"status":500,"error":"unexpected ` + r.Method + " " + r.Path + `"}`
 	})
 	res, err := c.Add(context.Background(), model.NewFact("k", "new", "config", "p", "s", ""))
-	if err == nil || !strings.Contains(err.Error(), "resurrecting an obsolete fact") || !strings.Contains(err.Error(), "journal entry lagged") {
+	if err == nil || !strings.Contains(err.Error(), "resurrecting an obsolete fact") || !strings.Contains(err.Error(), "journal entry lagged") || !strings.Contains(err.Error(), "journal append") {
 		t.Fatalf("a lagged correction over an obsolete fact must name the resurrection, got: %v", err)
 	}
 	if !res.Changed || !res.Resurrected {
 		t.Errorf("res = %+v, want Changed=true Resurrected=true", res)
+	}
+	// The lag must come from the append collision, not from journal-infra
+	// setup failing first (same reachability pin as the sibling tests).
+	fake.mu.Lock()
+	var sawAppend bool
+	for _, r := range fake.requests {
+		if r.Method == http.MethodPut && strings.HasPrefix(r.Path, "/velruna-history-") && strings.Contains(r.Path, "/_doc/") {
+			sawAppend = true
+		}
+	}
+	fake.mu.Unlock()
+	if !sawAppend {
+		t.Fatal("the journal append doc write never reached the fake — the 409 path is not being exercised")
 	}
 }
 

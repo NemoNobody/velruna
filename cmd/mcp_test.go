@@ -418,6 +418,9 @@ func TestMCPServerAddBatchSurfacesPartialSuccess(t *testing.T) {
 	if it.Error == "" {
 		t.Fatalf("the journal failure must be reported per item: %s", raw)
 	}
+	if strings.Contains(it.Error, "velruna_add failed") {
+		t.Errorf("the item error must carry only the batch label, not the single-add store label: %s", it.Error)
+	}
 	if !it.Created {
 		t.Errorf("item.created = false, want true (the fact doc stored; only the journal lagged): %s", raw)
 	}

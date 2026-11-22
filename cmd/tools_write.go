@@ -41,7 +41,7 @@ type addInput struct {
 type addOutput struct {
 	Key     string `json:"key" jsonschema:"the stored key"`
 	Created bool   `json:"created" jsonschema:"true when the fact was newly created, false when an existing fact was updated"`
-	Changed bool   `json:"changed" jsonschema:"true when a new version was accepted (birth, value correction); false = same-value touch: notes/source/qualifiers move, observed_at and the journal untouched"`
+	Changed bool   `json:"changed" jsonschema:"true when a new version was accepted (birth, value correction, status transition); false = same-value touch: notes/source move when supplied, observed_at and the journal untouched"`
 	Status  string `json:"status" jsonschema:"status of the stored fact"`
 	// PreviousSummary names the superseded version at zero journal cost:
 	// the summary the accepted correction replaced ("" when the prior fact
