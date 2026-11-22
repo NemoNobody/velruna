@@ -14,7 +14,10 @@ notes).
   every fact that carries a `superseded_by` link and reports the three ways an
   edge goes wrong — `dangling` (the target is gone), `unverified` (the target
   is not verified), `cycle` (the edge loops). Exit 1 when findings exist, exit
-  2 when the check itself could not run. Repair by repointing the source
+  2 when the check itself could not run. A scan that could not audit every
+  edge says so and never claims "clean": hits the scan fetched but could not
+  read are counted apart from edges it never fetched (only those are
+  recoverable by raising `--limit`). Repair by repointing the source
   (`velruna_patch superseded_by`) or retiring it too.
 - retire guard: `velruna_obsolete` and a `velruna_patch` status flip to
   `obsolete` are refused while other verified facts point at the target with
@@ -25,7 +28,11 @@ notes).
   dangling target.
 - `velruna dashboards gen-fields`: regenerates the bundled index-pattern field
   lists natively from the binary (token-preserving rewrite of the bundle);
-  the python generator is gone.
+  the python generator is gone. A mapping type the field table does not know
+  is reported instead of silently dropped, deliberately disabled objects are
+  skipped whole, and `index: false` leaves bake as not searchable (the
+  shipped bundle re-baked to match — OSD no longer offers the docs `html`
+  body as a queryable field).
 - `status` reports the store schema and field-type drift (`schema:` /
   `mapping:` lines, `schema_hint` in `velruna_status`): a mapping mismatch
   between binary and store is named instead of surfacing as odd search

@@ -368,6 +368,11 @@ renaming `index_name` in the config would orphan `velruna-history-*`** — every
 migrated fact's journal would read empty while `current_ref` points into an
 index nothing reads.
 
+(All the `curl`s below use `http://localhost:9200` — match them to your
+`opensearch_url`: the default config uses `https://127.0.0.1:9200`, needs
+`-k` for the self-signed certificate, and `-u "$OS_USER"` makes curl prompt
+for the password instead of putting it in the command line or history.)
+
 ```bash
 # 1. Create the target index with the current mapping: one write under a new
 #    name. Use a config where index_name is DEFINITELY set (jq rewrites or
@@ -377,10 +382,15 @@ jq '.index_name = "velruna_new"' velruna.conf > /tmp/reindex.conf
 VELRUNA_CONF=/tmp/reindex.conf velruna status | grep 'index:'   # must show velruna_new
 VELRUNA_CONF=/tmp/reindex.conf velruna add reindex:seed "placeholder" context_map -p velruna
 
-# 2. Copy the documents (the placeholder can be removed afterwards).
+# 2. Copy the documents. From here until the swap is done the store must
+#    stay quiet for writes: _reindex skips documents whose version changed
+#    mid-copy (counted as version_conflicts) and would leave stale copies
+#    unnoticed.
 curl -u "$OS_USER" -H 'Content-Type: application/json' -X POST \
   http://localhost:9200/_reindex \
   -d '{"source":{"index":"velruna"},"dest":{"index":"velruna_new"}}'
+#    The response must report "version_conflicts": 0; anything else means
+#    something moved during the copy — redo step 2 with the store idle.
 
 # 3. Verify the copy against the old store BEFORE removing anything: count
 #    documents on both sides. (Do not use `velruna list | wc -l`: list needs
@@ -400,18 +410,28 @@ curl -u "$OS_USER" -H 'Content-Type: application/json' -X PUT http://localhost:9
   -d '{"actions":[{"add":{"index":"velruna_new","alias":"velruna"}}]}'
 velruna status            # schema: v1  mapping: ok
 
-# 5. The seed write in step 1 ran under index_name=velruna_new, so it created
-#    a journal index of its own (journal names derive from the index name at
-#    write time). After the swap nothing reads velruna_new-history-* and the
-#    seed fact's current_ref points into it: drop the stray journal index
-#    (the seed fact itself can be retired as usual through the alias).
-curl -u "$OS_USER" -X DELETE http://localhost:9200/velruna_new-history-*
+# 5. The seed write in step 1 ran under index_name=velruna_new, and it
+#    installed its own journal infrastructure: a velruna_new-history-*
+#    index (journal names derive from the index name at write time), a
+#    composable template velruna_new-journal and an ingest pipeline
+#    velruna_new-journal-ts. After the swap nothing reads them, and the
+#    seed fact's current_ref points into the stray index. Wildcard index
+#    deletes are rejected by default (action.destructive_requires_name),
+#    so resolve the names and delete exactly what is listed:
+curl -u "$OS_USER" "http://localhost:9200/_cat/indices/velruna_new-history-*?h=index"
+curl -u "$OS_USER" -X DELETE http://localhost:9200/velruna_new-history-2026.11  # one per listed name
+curl -u "$OS_USER" -X DELETE http://localhost:9200/_index_template/velruna_new-journal
+curl -u "$OS_USER" -X DELETE http://localhost:9200/_ingest/pipeline/velruna_new-journal-ts
+#    (the seed fact itself can be retired as usual through the alias.)
 ```
 
-The window between the DELETE and the alias write is downtime: no writes may
-reach the store during it. If the store role cannot create indices or aliases,
-an administrator has to run these requests — that is the same permission
-boundary `status` reports when it prints `schema: unreadable (HTTP 403)`.
+Writes must stay out of the store from step 2 through the alias write; the
+window between the DELETE and the alias is certainly downtime, but a write
+that lands during the reindex is invisible to the count check (it just
+doesn't make it into the copy). If the store role cannot create indices or
+aliases, an administrator has to run these requests — that is the same
+permission boundary `status` reports when it prints
+`schema: unreadable (HTTP 403)`.
 
 ## Re-verification (`confirmed_by`)
 
@@ -478,7 +498,9 @@ retirement). The check is advisory like every check-then-write (a link
 landing after the probe can still dangle), and data can predate the guard,
 so `velruna links check` (CLI, bounded by `--limit`) audits the whole graph
 with one scan plus one batched round of target probes: `dangling` (target gone), `unverified` (target not verified),
-`cycle` (the edge loops). Exit codes: 0 clean, 1 findings, 2 the check could
+`cycle` (the edge loops). Exit codes: 0 when the audit found nothing
+broken (the summary says when the graph was not fully audited), 1 findings,
+2 the check could
 not run; repair by repointing.
 
 ## Advisory contract and precedence
