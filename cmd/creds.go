@@ -157,16 +157,10 @@ that user.`,
 						// Storing it — especially over the named entry the runtime
 						// reads first — would swap a working credential for one
 						// the runtime cannot use, and "stored:" would be a lie.
-						// --url bypasses the config, so pointing at opensearch_user
-						// there would name a knob that cannot take effect.
-						knobs := "set OPENSEARCH_USER or opensearch_user if the store uses another"
-						if cfg == nil {
-							knobs = "under --url the config is bypassed: only OPENSEARCH_USER applies"
-						}
 						fatalErr(fmt.Errorf("the store at %s rejected the new password (HTTP 401): nothing stored — "+
 							"the runtime authenticates the same way; re-run with the right password "+
 							"(the probe authenticated as user %q — %s)",
-							config.RedactURL(target), probeUser(cfg), knobs))
+							config.RedactURL(target), probeUser(cfg), probe401Advice(cfg)))
 					}
 					if recorded := recordedClusterName(cfg); recorded != "" {
 						// The config already names this store (a previous
@@ -240,6 +234,17 @@ func probeUser(cfg *config.Config) string {
 	return config.DefaultConfig().OpenSearchUser
 }
 
+// probe401Advice names the credential knobs that can actually take effect
+// for this probe run: --url bypasses the config (cfg == nil), so naming
+// opensearch_user there would send the operator to a dead knob. Pure (like
+// linksSummaryLine) so both branches are testable without the os.Exit path.
+func probe401Advice(cfg *config.Config) string {
+	if cfg == nil {
+		return "under --url the config is bypassed: only OPENSEARCH_USER applies"
+	}
+	return "set OPENSEARCH_USER or opensearch_user if the store uses another"
+}
+
 // probeClusterUUID asks the store who it is, authenticating with the password
 // being stored: the cluster name keys the new entry, so the answer has to come
 // from a request that can already succeed with that credential.
@@ -258,7 +263,11 @@ func probeClusterUUID(target string, base *config.Config, pw string) (string, er
 	// scale with the node list so a slow node — even one that never answers
 	// — cannot eat the probe before a live node gets its turn. The probe
 	// client is read-only (Info only), so unlike the runtime client a
-	// timed-out attempt is safe to retry on the next node.
+	// timed-out attempt is safe to retry on the next node. The guarantee
+	// has a ceiling: with the 90s cap and the 5s per-attempt floor one
+	// probe covers at most 18 fully-hanging nodes — past that the budget,
+	// not the node list, bounds coverage (fast-failing nodes cost ~0s and
+	// are always visited).
 	n := len(addresses)
 	budget := time.Duration(n) * 10 * time.Second
 	if budget > 90*time.Second {

@@ -860,8 +860,8 @@ func loadFile(cfg *Config, path string) error {
 	if len(c.OpenSearchURLs) > 0 {
 		cfg.OpenSearchURLs = c.OpenSearchURLs
 	}
-	if c.OpenSearchCluster != "" {
-		cfg.OpenSearchCluster = strings.TrimSpace(c.OpenSearchCluster)
+	if v := strings.TrimSpace(c.OpenSearchCluster); v != "" {
+		cfg.OpenSearchCluster = v
 	}
 	if u := strings.TrimSpace(c.OpenSearchUser); u != "" {
 		cfg.OpenSearchUser = u

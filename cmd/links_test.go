@@ -38,9 +38,10 @@ func TestLinksSummaryLineCounts(t *testing.T) {
 
 	// At the window edge the advice must say what raising can and cannot
 	// do: from limit=9999 on the scan already asks for the whole result
-	// window, so no higher limit fetches another edge. The pair here is
-	// exactly what the scan returns at limit=9999: 9999 edges kept, the
-	// +1 probe fetched but trimmed, the rest beyond the window.
+	// window, so no higher limit fetches another edge. The 9999 row is a
+	// pair the scan actually returns (9999 edges kept, the +1 probe
+	// fetched but trimmed, the rest beyond the window); the higher limits
+	// share the same window branch and pin only the beyond-window phrase.
 	for _, lim := range []int{9999, 10000, 20000} {
 		rep = &client.LinksReport{Edges: client.LinkScanMax - 1, Fetched: client.LinkScanMax, Total: 12345, Truncated: true}
 		got = linksSummaryLine(rep, lim)

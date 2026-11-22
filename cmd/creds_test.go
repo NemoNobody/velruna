@@ -393,6 +393,19 @@ func TestProbeClusterUUIDRetriesPastHangingNode(t *testing.T) {
 	}
 }
 
+// probe401Advice names only knobs that can take effect: the --url run has
+// no config, so opensearch_user must not appear there.
+func TestProbe401Advice(t *testing.T) {
+	both := probe401Advice(config.DefaultConfig())
+	if !strings.Contains(both, "OPENSEARCH_USER") || !strings.Contains(both, "opensearch_user") {
+		t.Errorf("configured run must name both knobs: %q", both)
+	}
+	urlOnly := probe401Advice(nil)
+	if !strings.Contains(urlOnly, "OPENSEARCH_USER") || strings.Contains(urlOnly, "opensearch_user") {
+		t.Errorf("--url run must name only OPENSEARCH_USER: %q", urlOnly)
+	}
+}
+
 // Entries created for a store the current config no longer points at are only
 // reachable through an explicit label; rm must not touch the configured store's
 // legacy entry while cleaning up an orphan by --name.
