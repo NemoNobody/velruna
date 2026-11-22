@@ -661,6 +661,13 @@ func (c *Client) Obsolete(ctx context.Context, key, reason string, redactions []
 		// changes) — notes would grow audit lines the journal never recorded.
 		return contractErrorf("obsolete: fact %q is already obsolete (a reason belongs to the verified→obsolete transition)", key)
 	}
+	// A retirement must not strand the readers that name this fact as their
+	// successor: while any superseded_by points here, the transition is refused.
+	if existing.Status != "obsolete" {
+		if err := c.refuseRetireWithIncoming(ctx, key); err != nil {
+			return fmt.Errorf("obsolete fact: %w", err)
+		}
+	}
 	// notes is one line per qualifier (see Patch): fold any whitespace run a
 	// caller passes into single spaces before the reason joins the notes.
 	reason = strings.Join(strings.Fields(reason), " ")

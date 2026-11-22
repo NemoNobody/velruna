@@ -284,6 +284,13 @@ func (c *Client) Patch(ctx context.Context, key string, p PatchFields) (PatchRes
 		// entry (no state was accepted) — a silent audit lie.
 		return PatchResult{}, contractErrorf("patch: fact %q is already obsolete (a reason belongs to the verified→obsolete transition)", key)
 	}
+	// Retiring a fact other records point at would leave their superseded_by
+	// dangling: refuse while any incoming link exists (see links.go).
+	if statusChanged && p.Status == "obsolete" {
+		if err := c.refuseRetireWithIncoming(ctx, key); err != nil {
+			return PatchResult{}, err
+		}
+	}
 	if statusChanged && p.Status == "obsolete" && p.Reason != "" {
 		// notes is one line per qualifier: a reason with newlines would
 		// embed a multi-line block and break the "one line, one event"

@@ -3,6 +3,7 @@ package client
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strings"
 	"testing"
@@ -37,8 +38,57 @@ func (s *supersedeStore) respond(r recordedRequest) (int, string) {
 		key := strings.TrimPrefix(r.Path, "/velruna/_update/")
 		s.writes = append(s.writes, key)
 		return http.StatusOK, `{"_index":"velruna","_id":"` + key + `","result":"updated"}`
+	case r.Method == http.MethodPost && r.Path == "/velruna/_search":
+		// The only search the write path issues is the incoming-link probe.
+		return s.linkSearch(r.Body)
 	}
 	return http.StatusInternalServerError, `{"status":500,"error":"unexpected ` + r.Method + " " + r.Path + `"}`
+}
+
+// linkSearch answers a superseded_by term probe from the stored documents.
+func (s *supersedeStore) linkSearch(body string) (int, string) {
+	var req struct {
+		Query struct {
+			Term map[string]json.RawMessage `json:"term"`
+		} `json:"query"`
+		Size int `json:"size"`
+	}
+	if err := json.Unmarshal([]byte(body), &req); err != nil {
+		return http.StatusBadRequest, `{"error":"bad probe body"}`
+	}
+	target := ""
+	for _, raw := range req.Query.Term {
+		// The probe sends the shorthand {"field": value}; accept the long
+		// {"field": {"value": ...}} form as well.
+		var val string
+		if err := json.Unmarshal(raw, &val); err == nil {
+			target = val
+			break
+		}
+		var cond struct {
+			Value string `json:"value"`
+		}
+		if err := json.Unmarshal(raw, &cond); err == nil {
+			target = cond.Value
+			break
+		}
+	}
+	var hits []string
+	total := 0
+	for key, src := range s.docs {
+		var doc struct {
+			SupersededBy string `json:"superseded_by"`
+		}
+		if err := json.Unmarshal([]byte(src), &doc); err != nil || doc.SupersededBy != target {
+			continue
+		}
+		total++
+		if req.Size > 0 && len(hits) >= req.Size {
+			continue
+		}
+		hits = append(hits, `{"_source":{"key":"`+key+`"}}`)
+	}
+	return http.StatusOK, `{"hits":{"total":{"value":` + fmt.Sprint(total) + `},"hits":[` + strings.Join(hits, ",") + `]}}`
 }
 
 // factJSON renders a stored fact document. created is the creation date the

@@ -20,6 +20,9 @@ func patchRespond(source string, updateBody *string) func(recordedRequest) (int,
 		if code, body := journalRoutesOK(r); code != http.StatusInternalServerError {
 			return code, body
 		}
+		if code, body := linkProbeOK(r); code != http.StatusInternalServerError {
+			return code, body
+		}
 		switch {
 		case r.Method == http.MethodGet && r.Path == "/velruna/_doc/k":
 			return http.StatusOK, `{"_index":"velruna","_id":"k","found":true,"_source":` + source + `}`
