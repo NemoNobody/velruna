@@ -382,16 +382,30 @@ curl -u "$OS_USER" -H 'Content-Type: application/json' -X POST \
   http://localhost:9200/_reindex \
   -d '{"source":{"index":"velruna"},"dest":{"index":"velruna_new"}}'
 
-# 3. Verify reads against the old count BEFORE removing anything:
-VELRUNA_CONF=/tmp/reindex.conf velruna list | wc -l
+# 3. Verify the copy against the old store BEFORE removing anything: count
+#    documents on both sides. (Do not use `velruna list | wc -l`: list needs
+#    a project argument, prints note lines and caps at a nav limit — it is
+#    not a document count.)
+curl -u "$OS_USER" "http://localhost:9200/velruna/_count"
+curl -u "$OS_USER" "http://localhost:9200/velruna_new/_count"   # must match (the placeholder adds one)
 
-# 4. Swap the name atomically from the operator's side: drop the old index and
-#    point an ALIAS of the old name at the new index. The config never changes,
-#    so journal indices (velruna-history-*) keep working untouched.
+# 4. Swap the name from the operator's side: drop the old index and point an
+#    ALIAS of the old name at the new index. These are two separate requests
+#    inside ONE downtime window — nothing is atomic here, and the alias
+#    cannot precede the DELETE because the old index still occupies the name.
+#    The config never changes, so journal indices (velruna-history-*) keep
+#    working untouched for everything migrated.
 curl -u "$OS_USER" -X DELETE http://localhost:9200/velruna
 curl -u "$OS_USER" -H 'Content-Type: application/json' -X PUT http://localhost:9200/_aliases \
   -d '{"actions":[{"add":{"index":"velruna_new","alias":"velruna"}}]}'
 velruna status            # schema: v1  mapping: ok
+
+# 5. The seed write in step 1 ran under index_name=velruna_new, so it created
+#    a journal index of its own (journal names derive from the index name at
+#    write time). After the swap nothing reads velruna_new-history-* and the
+#    seed fact's current_ref points into it: drop the stray journal index
+#    (the seed fact itself can be retired as usual through the alias).
+curl -u "$OS_USER" -X DELETE http://localhost:9200/velruna_new-history-*
 ```
 
 The window between the DELETE and the alias write is downtime: no writes may
@@ -463,7 +477,7 @@ referrer's edge no longer blocks, and a self-link resolves itself on
 retirement). The check is advisory like every check-then-write (a link
 landing after the probe can still dangle), and data can predate the guard,
 so `velruna links check` (CLI, bounded by `--limit`) audits the whole graph
-in one read: `dangling` (target gone), `unverified` (target not verified),
+with one scan plus one batched round of target probes: `dangling` (target gone), `unverified` (target not verified),
 `cycle` (the edge loops). Exit codes: 0 clean, 1 findings, 2 the check could
 not run; repair by repointing.
 
