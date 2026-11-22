@@ -43,8 +43,10 @@ tag filter would silently stop matching tags the analyzer splits.
 ### Key conventions
 
 - `key` is the document ID. Re-adding the same key is an idempotent upsert:
-  a new value is appended to the journal and the fact points at the entry
-  (`current_ref`); the same value updates notes only.
+  a new value points the fact at a fresh journal entry (`current_ref`,
+  doc-first); the same value updates notes/source only — except an
+  obsolete fact, whose re-add is a resurrection: the event is journaled
+  and `observed_at` moves.
 - `key` should be stable, unique per fact, and written in **predictable English**
   (`project:area:location:detail`) — a later session must be able to guess it
   without searching.
@@ -109,10 +111,11 @@ blocks, orders X..Y`) on a huge document — are read limits, not storage limits
 velruna add <key> <value> <category> [--project <p>] [--source <s>] [--notes <n>] [--summary <s>]
 ```
 
-Adds a fact. If the key exists: a different value corrects it (the accepted
-value is appended to the journal, then the main doc is updated to point at the
-entry); the same value updates `notes`/`source` only (no journal entry,
-`observed_at` stays). A correction's journal entry carries the merged accepted
+Adds a fact. If the key exists: a different value corrects it (the doc is
+updated to point at a preallocated journal-entry id, then the entry is
+appended under it); the same value updates `notes`/`source` only (no journal
+entry, `observed_at` stays) — except an obsolete fact, whose re-add
+resurrects it: journaled, and `observed_at` moves. A correction's journal entry carries the merged accepted
 state — the new value with the stored `source`/`notes` when the request left
 them empty — so the log and the doc never disagree about the qualifiers. The
 entry also repeats the doc's write-once `project` (a correction cannot move
@@ -250,11 +253,12 @@ the fact doc:
 - Write order is **doc-first**: the journal entry id is preallocated into
   `current_ref`, the fact doc is updated, then the entry is indexed. A lost
   entry append leaves `current_ref` dangling — `migrate-history` re-appends
-  the current state only for facts that never got a link (the creation
-  path); scripted writes preallocate a random uuid, so a lost scripted
-  append keeps its dangling ref until the next correction journals the
-  value; the reverse
-  order could journal a value that never reached the doc.
+  the current state only for facts that never got a link (legacy facts and
+  birth-path writes whose append failed); scripted writes preallocate a
+  random uuid, so *their* lost append keeps a dangling ref until the next
+  journaled write (correction, status transition, reverify or link)
+  repoints it. The reverse order could journal a value that never reached
+  the doc.
   Value corrections are last-writer-wins, not CAS: two concurrent
   corrections both land in the journal and the doc keeps the later one, so
   the journal is the log of *accepted writes*, not a sequence guaranteed to
@@ -727,7 +731,8 @@ Guarantees and limits:
 The CLI uses **Basic auth** (user + password). Connection and auth settings
 come from a config file:
 
-- `--conf <path>` flag (`velruna mcp` and `velruna status`)
+- `--conf <path>` flag (`velruna mcp`, `velruna status` and
+  `velruna dashboards push|gen-fields`)
 - `VELRUNA_CONF` env var
 - `velruna.conf` (current dir)
 - `velruna.conf` next to the binary
