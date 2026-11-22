@@ -22,16 +22,20 @@ func RewriteFields(bundle []byte, fieldsByTitle map[string]string) ([]byte, erro
 	sc := bufio.NewScanner(bytes.NewReader(bundle))
 	sc.Buffer(make([]byte, 0, 64*1024), 8*1024*1024)
 	line := 0
+	sawContent := false
 	for sc.Scan() {
 		line++
 		raw := sc.Bytes()
 		trimmed := bytes.TrimSpace(raw)
 		if len(trimmed) == 0 {
-			if len(bytes.TrimSpace(out.Bytes())) > 0 {
+			// Keep interior blank lines (a single O(1) flag, not a rescan of
+			// the output so far); only leading blanks are dropped.
+			if sawContent {
 				out.WriteByte('\n')
 			}
 			continue
 		}
+		sawContent = true
 		replacement, title, err := targetFields(trimmed, fieldsByTitle)
 		if err != nil {
 			return nil, fmt.Errorf("bundle line %d: %w", line, err)

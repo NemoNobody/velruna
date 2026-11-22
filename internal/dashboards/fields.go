@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
+	"strconv"
 )
 
 // OSD 3.x has no externally callable field-introspection API, so the bundle
@@ -65,26 +66,36 @@ var metaFields = []Field{
 }
 
 // MappingField is one property in an index mapping: either a leaf (with a
-// "type"), an object (with nested "properties"), or a leaf with multi-fields
-// (with "fields"). Exported so the store layer can decode mappings into it.
+// "type"), an object (with nested "properties"), a deliberately disabled
+// object ("enabled": false — not a field, and not a missing type), or a leaf
+// with multi-fields (with "fields"). Exported so the store layer can decode
+// mappings into it.
 type MappingField struct {
 	Type       string                  `json:"type"`
+	Enabled    *bool                   `json:"enabled"`
 	Properties map[string]MappingField `json:"properties"`
 	Fields     map[string]MappingField `json:"fields"`
 }
 
 // FieldsFromMapping walks the merged mapping properties of the concrete
-// indices behind a pattern and returns the OSD field list, sorted by name.
-// The sort keeps the bundle diff stable across runs; unmapped or unmapped-by-
-// us types are skipped, exactly as the generator has always skipped them.
-func FieldsFromMapping(props map[string]MappingField) []Field {
-	fields := flattenFields(props, "")
+// indices behind a pattern and returns the OSD field list, sorted by name,
+// plus the mapping types it had to skip (present in the mapping, absent from
+// the OSD table — the generator reports them rather than dropping fields in
+// silence). The sort keeps the bundle diff stable across runs.
+func FieldsFromMapping(props map[string]MappingField) ([]Field, []string) {
+	skipped := map[string]bool{}
+	fields := flattenFields(props, "", skipped)
 	fields = append(fields, metaFields...)
 	sort.Slice(fields, func(i, j int) bool { return fields[i].Name < fields[j].Name })
-	return fields
+	names := make([]string, 0, len(skipped))
+	for t := range skipped {
+		names = append(names, t)
+	}
+	sort.Strings(names)
+	return fields, names
 }
 
-func flattenFields(props map[string]MappingField, prefix string) []Field {
+func flattenFields(props map[string]MappingField, prefix string, skipped map[string]bool) []Field {
 	names := make([]string, 0, len(props))
 	for name := range props {
 		names = append(names, name)
@@ -97,13 +108,16 @@ func flattenFields(props map[string]MappingField, prefix string) []Field {
 	for _, name := range names {
 		spec := props[name]
 		path := prefix + name
-		if spec.Type == "" {
-			if len(spec.Properties) > 0 { // object: walk in
-				out = append(out, flattenFields(spec.Properties, path+".")...)
-			}
-			continue
+		_, isLeaf := fieldTypes[spec.Type]
+		if len(spec.Properties) > 0 && !isLeaf {
+			// A container (typeless object, "object", "nested") is walked
+			// into: OSD lists its leaves, not the container. velruna's own
+			// mappings use typeless objects; the general case must not lose
+			// fields from foreign mappings either.
+			out = append(out, flattenFields(spec.Properties, path+".", skipped)...)
 		}
-		if ft, ok := fieldTypes[spec.Type]; ok {
+		if isLeaf {
+			ft := fieldTypes[spec.Type]
 			out = append(out, Field{
 				Name:              path,
 				Type:              ft.osdType,
@@ -112,6 +126,15 @@ func flattenFields(props map[string]MappingField, prefix string) []Field {
 				Aggregatable:      ft.aggs,
 				ReadFromDocValues: ft.docs,
 			})
+		} else if spec.Type != "" && len(spec.Properties) == 0 {
+			if spec.Enabled != nil && !*spec.Enabled {
+				// A deliberately disabled object: the store chose not to index
+				// it — absence is the design, not a generator gap.
+				continue
+			}
+			// A leaf type the OSD table does not know (float, ip,
+			// date_nanos, ...): reported, never silently dropped.
+			skipped[spec.Type] = true
 		}
 		// Multi-fields (e.g. a text field with a .keyword subfield) are
 		// separate entries in OSD.
@@ -124,6 +147,9 @@ func flattenFields(props map[string]MappingField, prefix string) []Field {
 			for _, sub := range subs {
 				ft, ok := fieldTypes[spec.Fields[sub].Type]
 				if !ok {
+					if spec.Fields[sub].Type != "" {
+						skipped[spec.Fields[sub].Type] = true
+					}
 					continue
 				}
 				out = append(out, Field{
@@ -159,9 +185,9 @@ func RenderFields(fields []Field) (string, error) {
 			{"name", jsonString(f.Name)},
 			{"type", jsonString(f.Type)},
 			{"esTypes", stringSlice(f.EsTypes)},
-			{"count", []byte("0")},
-			{"scripted", []byte("false")},
-			{"searchable", []byte("true")},
+			{"count", jsonInt(f.Count)},
+			{"scripted", jsonBool(f.Scripted)},
+			{"searchable", jsonBool(f.Searchable)},
 			{"aggregatable", jsonBool(f.Aggregatable)},
 			{"readFromDocValues", jsonBool(f.ReadFromDocValues)},
 		} {
@@ -212,4 +238,10 @@ func jsonBool(v bool) []byte {
 		return []byte("true")
 	}
 	return []byte("false")
+}
+
+// jsonInt renders a field count the way the bundle stores it (always 0 in a
+// freshly baked list; OSD rewrites it at runtime).
+func jsonInt(v int) []byte {
+	return []byte(strconv.Itoa(v))
 }

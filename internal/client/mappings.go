@@ -12,10 +12,13 @@ import (
 )
 
 // IndexMappingProps reads the mapping properties of every concrete index
-// behind a name or a pattern and merges them, first definition wins. The
-// concrete indices are merged in sorted-name order: the store's response order
-// is not defined, and a field list that depends on it would change between
-// runs of the same generator against the same store.
+// behind a name or a pattern and merges them, newest definition wins. The
+// concrete indices are merged in reverse sorted-name order: the store's
+// response order is not defined, and a field list that depends on it would
+// change between runs of the same generator against the same store; dated
+// period indices (velruna-history-2026.10, -2026.11) sort oldest first, so
+// walking them last-to-first lets a field whose type moved between periods
+// carry its CURRENT shape rather than the oldest one.
 //
 // An absent index is an error, not an empty mapping: the generator keeps the
 // old field list and must be able to say why.
@@ -56,12 +59,19 @@ func (c *Client) IndexMappingProps(ctx context.Context, index string) (map[strin
 	}
 
 	merged := map[string]dashboards.MappingField{}
-	for _, name := range names {
-		for field, spec := range res[name].Mappings.Properties {
+	for i := len(names) - 1; i >= 0; i-- {
+		for field, spec := range res[names[i]].Mappings.Properties {
 			if _, seen := merged[field]; !seen {
 				merged[field] = spec
 			}
 		}
+	}
+	if len(merged) == 0 {
+		// The index (or every index behind the pattern) exists but carries no
+		// mapping properties. Baking from it would collapse the field list to
+		// just the meta fields — the very damage the empty-body guard above
+		// exists to prevent, one shape further in.
+		return nil, nil, fmt.Errorf("index %s at %s has no mapping properties", index, c.endpointLabel())
 	}
 	return merged, names, nil
 }

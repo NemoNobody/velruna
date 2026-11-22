@@ -9,11 +9,12 @@ import (
 func TestFieldsFromMappingBakesTheBundleShape(t *testing.T) {
 	var props map[string]MappingField
 	// A mapping fragment in the shape the store answers: a text field with a
-	// keyword subfield, an object to walk into, scalars, and a type this
-	// generator has no OSD equivalent for.
+	// keyword subfield, an object to walk into (typed and typeless), scalars,
+	// and a type this generator has no OSD equivalent for.
 	if err := json.Unmarshal([]byte(`{
 		"value": {"type": "text", "fields": {"keyword": {"type": "keyword"}}},
 		"model": {"properties": {"name": {"type": "keyword"}}},
+		"nested_obj": {"type": "object", "properties": {"deep": {"type": "keyword"}}},
 		"observed_at": {"type": "date"},
 		"ttl_days": {"type": "integer"},
 		"confirmed_by": {"type": "object", "enabled": false},
@@ -22,14 +23,19 @@ func TestFieldsFromMappingBakesTheBundleShape(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	fields := FieldsFromMapping(props)
+	fields, skipped := FieldsFromMapping(props)
 	var names []string
 	for _, f := range fields {
 		names = append(names, f.Name)
 	}
-	want := "_index,model.name,observed_at,ttl_days,value,value.keyword"
+	want := "_index,model.name,nested_obj.deep,observed_at,ttl_days,value,value.keyword"
 	if got := strings.Join(names, ","); got != want {
 		t.Errorf("field names = %s, want %s", got, want)
+	}
+	// Types without an OSD equivalent are reported, never dropped in silence;
+	// a deliberately disabled object is not one of them.
+	if strings.Join(skipped, ",") != "knn_vector" {
+		t.Errorf("skipped = %v, want only knn_vector reported", skipped)
 	}
 
 	rendered, err := RenderFields(fields)
@@ -67,6 +73,23 @@ func TestFieldsFromMappingBakesTheBundleShape(t *testing.T) {
 	}
 	if f := byName["ttl_days"]; f.Type != "number" {
 		t.Errorf("integer must normalize to number: %+v", f)
+	}
+}
+
+// Field names reach the bundle through jsonString: quotes and backslashes
+// must survive the bake and the parse-back round trip exactly.
+func TestRenderFieldsEscapesHostileNames(t *testing.T) {
+	fields := []Field{{Name: `we"ird\name`, Type: "string", EsTypes: []string{"keyword"}, Searchable: true, Aggregatable: true}}
+	rendered, err := RenderFields(fields)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var back []Field
+	if err := json.Unmarshal([]byte(rendered), &back); err != nil {
+		t.Fatalf("rendered list is not valid JSON: %v (%s)", err, rendered)
+	}
+	if len(back) != 1 || back[0].Name != `we"ird\name` {
+		t.Errorf("escape round trip wrong: %+v (%s)", back, rendered)
 	}
 }
 

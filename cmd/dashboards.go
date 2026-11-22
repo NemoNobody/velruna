@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/NemoNobody/velruna/internal/client"
 	"github.com/NemoNobody/velruna/internal/config"
@@ -154,7 +155,7 @@ func genFields(out, errOut io.Writer, conf, file, outPath, indexOverride string)
 			}
 			continue
 		}
-		fields := dashboards.FieldsFromMapping(props)
+		fields, skipped := dashboards.FieldsFromMapping(props)
 		rendered, err := dashboards.RenderFields(fields)
 		if err != nil {
 			return fmt.Errorf("%s: %w", t.title, err)
@@ -162,6 +163,14 @@ func genFields(out, errOut io.Writer, conf, file, outPath, indexOverride string)
 		fieldsByTitle[t.title] = rendered
 		if err := writeLine(out, fmt.Sprintf("%s: %d field(s) baked from %s", t.title, len(fields), t.index)); err != nil {
 			return err
+		}
+		if len(skipped) > 0 {
+			// Fields of these mapping types were left out: the OSD type table
+			// does not know them. Say so instead of letting a shorter list pass
+			// for a complete one.
+			if _, werr := fmt.Fprintf(errOut, "%s: skipped mapping type(s) not in the OSD table: %s\n", t.title, strings.Join(skipped, ", ")); werr != nil {
+				return werr
+			}
 		}
 	}
 	if len(fieldsByTitle) == 0 {
