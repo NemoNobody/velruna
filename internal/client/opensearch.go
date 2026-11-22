@@ -295,6 +295,7 @@ func buildIndexBody(replicas int) map[string]interface{} {
 		},
 		"mappings": map[string]interface{}{
 			"properties": buildIndexProperties(),
+			"_meta":      schemaMeta(),
 		},
 	}
 }
@@ -351,6 +352,12 @@ func (c *Client) EnsureIndex(ctx context.Context) error {
 	resp, err := c.api.Indices.Exists(ctx, existsReq)
 	switch {
 	case err == nil:
+		// A store written by a newer binary is refused before anything is
+		// written; a store from an older one is upgraded in place by the
+		// mapping reconcile below.
+		if serr := c.ensureSchemaVersion(ctx); serr != nil {
+			return serr
+		}
 		c.reconcileReplicas(ctx)
 		// Best effort, like the replica reconcile: a mapping the cluster
 		// refuses (a field already exists with another type) must not break

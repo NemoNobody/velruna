@@ -35,6 +35,9 @@ func (c *Client) reconcileMapping(ctx context.Context) error {
 	}
 	body, err := json.Marshal(map[string]interface{}{
 		"properties": buildIndexProperties(),
+		// Stamps the schema this binary writes: a newer binary refuses a store
+		// it cannot understand, and this is what it reads.
+		"_meta": schemaMeta(),
 	})
 	if err != nil {
 		return fmt.Errorf("reconcile index mapping %s: %w", c.cfg.IndexName, err)
