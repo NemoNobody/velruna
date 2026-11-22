@@ -7,13 +7,12 @@ import (
 	"github.com/NemoNobody/velruna/internal/dashboards"
 )
 
-// The baked field lists in the embedded bundle must equal what the CURRENT
-// schema would bake: a mapping change with a forgotten
-// `velruna dashboards gen-fields` fails here instead of surprising the
-// operator with empty panels later. (The live generator needs a store; this
-// test pins the same contract from the mapping bodies the client itself
-// writes.)
-func TestBundleFieldListsMatchTheCurrentSchema(t *testing.T) {
+// currentBakedFields renders the field list the CURRENT schema would bake
+// for each known pattern, keyed by pattern title. (The live generator needs
+// a store; this pins the same contract from the mapping bodies the client
+// itself writes.)
+func currentBakedFields(t *testing.T) map[string]string {
+	t.Helper()
 	propsOf := func(body map[string]interface{}) map[string]dashboards.MappingField {
 		mappings, _ := body["mappings"].(map[string]interface{})
 		raw, err := json.Marshal(mappings["properties"])
@@ -45,6 +44,15 @@ func TestBundleFieldListsMatchTheCurrentSchema(t *testing.T) {
 		}
 		want[title] = rendered
 	}
+	return want
+}
+
+// The baked field lists in the embedded bundle must equal what the CURRENT
+// schema would bake: a mapping change with a forgotten
+// `velruna dashboards gen-fields` fails here instead of surprising the
+// operator with empty panels later.
+func TestBundleFieldListsMatchTheCurrentSchema(t *testing.T) {
+	want := currentBakedFields(t)
 
 	objs, err := dashboards.Parse(dashboards.Bundle())
 	if err != nil {
@@ -73,5 +81,191 @@ func TestBundleFieldListsMatchTheCurrentSchema(t *testing.T) {
 	}
 	if found != len(want) {
 		t.Errorf("bundle carried %d of %d known patterns", found, len(want))
+	}
+}
+
+// The pattern time fields, the visualization aggregations and filters, and
+// the dashboard panel refs must resolve against the same schema the field
+// lists are baked from. Regenerating the field lists after a mapping rename
+// would otherwise leave a terms aggregation or a time filter pointing at a
+// field OSD cannot find — "Could not locate that index-pattern-field" at
+// panel time, with green tests.
+func TestBundleObjectsResolveAgainstTheCurrentSchema(t *testing.T) {
+	fieldSets := map[string]map[string]dashboards.Field{}
+	for title, rendered := range currentBakedFields(t) {
+		var fs []dashboards.Field
+		if err := json.Unmarshal([]byte(rendered), &fs); err != nil {
+			t.Fatalf("%s: baked list does not parse: %v", title, err)
+		}
+		set := make(map[string]dashboards.Field, len(fs))
+		for _, f := range fs {
+			set[f.Name] = f
+		}
+		fieldSets[title] = set
+	}
+
+	objs, err := dashboards.Parse(dashboards.Bundle())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// The field each pattern is a time-based index on. Changing one is a
+	// deliberate, reviewed change: existing saved searches and panel time
+	// filters break when it moves.
+	wantTime := map[string]string{
+		"velruna":           "updated_at",
+		"velruna-history-*": "created_at",
+		"velruna-docs":      "fetched_at",
+	}
+	patternTitleByID := map[string]string{}
+	visIDs := map[string]bool{}
+	for _, o := range objs {
+		switch o.Type {
+		case "index-pattern":
+			var attrs struct {
+				Title         string `json:"title"`
+				TimeFieldName string `json:"timeFieldName"`
+			}
+			if err := json.Unmarshal(o.Attributes, &attrs); err != nil {
+				t.Fatal(err)
+			}
+			patternTitleByID[o.ID] = attrs.Title
+			set, known := fieldSets[attrs.Title]
+			if !known {
+				continue
+			}
+			if attrs.TimeFieldName != wantTime[attrs.Title] {
+				t.Errorf("pattern %s: timeFieldName = %q, want %q", attrs.Title, attrs.TimeFieldName, wantTime[attrs.Title])
+				continue
+			}
+			f, found := set[attrs.TimeFieldName]
+			if !found {
+				t.Errorf("pattern %s: timeFieldName %q is not in its own field list", attrs.Title, attrs.TimeFieldName)
+			} else if f.Type != "date" {
+				t.Errorf("pattern %s: timeFieldName %q is type %q, want date", attrs.Title, attrs.TimeFieldName, f.Type)
+			}
+		case "visualization":
+			visIDs[o.ID] = true
+		}
+	}
+
+	for _, o := range objs {
+		if o.Type != "visualization" {
+			continue
+		}
+		var refs []struct {
+			Name string `json:"name"`
+			Type string `json:"type"`
+			ID   string `json:"id"`
+		}
+		if err := json.Unmarshal(o.References, &refs); err != nil {
+			t.Fatalf("visualization %s: references: %v", o.ID, err)
+		}
+		title := ""
+		for _, r := range refs {
+			if r.Type == "index-pattern" {
+				if ti, ok := patternTitleByID[r.ID]; ok {
+					title = ti
+				}
+			}
+		}
+		if title == "" {
+			t.Errorf("visualization %s references no known index-pattern", o.ID)
+			continue
+		}
+		set := fieldSets[title]
+
+		var attrs struct {
+			VisState string `json:"visState"`
+			Meta     struct {
+				SearchSourceJSON string `json:"searchSourceJSON"`
+			} `json:"kibanaSavedObjectMeta"`
+		}
+		if err := json.Unmarshal(o.Attributes, &attrs); err != nil {
+			t.Fatalf("visualization %s: attributes: %v", o.ID, err)
+		}
+
+		var vis struct {
+			Aggs []struct {
+				ID     string `json:"id"`
+				Type   string `json:"type"`
+				Params struct {
+					Field string `json:"field"`
+				} `json:"params"`
+			} `json:"aggs"`
+		}
+		if err := json.Unmarshal([]byte(attrs.VisState), &vis); err != nil {
+			t.Fatalf("visualization %s: visState: %v", o.ID, err)
+		}
+		for _, agg := range vis.Aggs {
+			if agg.Params.Field == "" { // count-style aggs carry no field
+				continue
+			}
+			f, ok := set[agg.Params.Field]
+			if !ok {
+				t.Errorf("visualization %s: agg %q (%s) points at %q, absent from pattern %s", o.ID, agg.ID, agg.Type, agg.Params.Field, title)
+				continue
+			}
+			if !f.Aggregatable {
+				t.Errorf("visualization %s: agg %q (%s) aggregates the non-aggregatable field %q", o.ID, agg.ID, agg.Type, agg.Params.Field)
+			}
+		}
+
+		var ss struct {
+			Filter []struct {
+				Meta struct {
+					Key string `json:"key"`
+				} `json:"meta"`
+			} `json:"filter"`
+		}
+		if err := json.Unmarshal([]byte(attrs.Meta.SearchSourceJSON), &ss); err != nil {
+			t.Fatalf("visualization %s: searchSourceJSON: %v", o.ID, err)
+		}
+		for _, fl := range ss.Filter {
+			if fl.Meta.Key == "" {
+				continue
+			}
+			if _, ok := set[fl.Meta.Key]; !ok {
+				t.Errorf("visualization %s: filter on %q, absent from pattern %s", o.ID, fl.Meta.Key, title)
+			}
+		}
+	}
+
+	for _, o := range objs {
+		if o.Type != "dashboard" {
+			continue
+		}
+		var refs []struct {
+			Name string `json:"name"`
+			Type string `json:"type"`
+			ID   string `json:"id"`
+		}
+		if err := json.Unmarshal(o.References, &refs); err != nil {
+			t.Fatalf("dashboard: references: %v", err)
+		}
+		refNames := map[string]bool{}
+		for _, r := range refs {
+			refNames[r.Name] = true
+			if r.Type == "visualization" && !visIDs[r.ID] {
+				t.Errorf("dashboard references visualization %q the bundle does not carry", r.ID)
+			}
+		}
+		var attrs struct {
+			PanelsJSON string `json:"panelsJSON"`
+		}
+		if err := json.Unmarshal(o.Attributes, &attrs); err != nil {
+			t.Fatalf("dashboard: attributes: %v", err)
+		}
+		var panels []struct {
+			PanelRefName string `json:"panelRefName"`
+		}
+		if err := json.Unmarshal([]byte(attrs.PanelsJSON), &panels); err != nil {
+			t.Fatalf("dashboard: panelsJSON: %v", err)
+		}
+		for _, p := range panels {
+			if !refNames[p.PanelRefName] {
+				t.Errorf("dashboard panel %q references no saved-object ref", p.PanelRefName)
+			}
+		}
 	}
 }

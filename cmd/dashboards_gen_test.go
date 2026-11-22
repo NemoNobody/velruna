@@ -124,10 +124,17 @@ func TestDashboardsGenFieldsBakesAndPreserves(t *testing.T) {
 		// The HTTP path end to end: an index:false leaf arrives through the
 		// raw mapping body and must bake unsearchable.
 		if line == lines[2] {
+			found := false
 			for _, f := range fields {
-				if f.Name == "html" && f.Searchable {
-					t.Errorf("index:false html baked searchable through the generator path: %s", obj.Attributes.Fields)
+				if f.Name == "html" {
+					found = true
+					if f.Searchable {
+						t.Errorf("index:false html baked searchable through the generator path: %s", obj.Attributes.Fields)
+					}
 				}
+			}
+			if !found {
+				t.Errorf("html vanished from the docs field list — the witness would pass silently: %s", obj.Attributes.Fields)
 			}
 		}
 	}

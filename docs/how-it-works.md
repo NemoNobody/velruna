@@ -29,6 +29,7 @@ document keyed by its `key` (the key is the document ID).
 | `host` | keyword | host label of the writer at creation (write-once, self-reported) |
 | `session` | keyword | agent session label at creation (write-once, self-reported) |
 | `updated_by` | keyword | self-reported label of the last writer (moves on every write) |
+| `confirmed_by` | object (`enabled: false`) | who re-verified the fact (the confirmed-by set) — stored, never indexed |
 | `current_ref` | keyword | id of the journal entry that carries the current value |
 | `history` | object (`enabled: false`) | **legacy** pre-journal array `[{value, observed_at, source}]` — stored, never indexed; `velruna migrate-history` moves it into the journal and removes the field |
 
@@ -378,22 +379,28 @@ for the password instead of putting it in the command line or history.)
 #    name. Use a config where index_name is DEFINITELY set (jq rewrites or
 #    creates the key; sed silently no-ops when the key is absent from the
 #    default file) — and verify it before writing anything:
-jq '.index_name = "velruna_new"' velruna.conf > /tmp/reindex.conf
-chmod 600 /tmp/reindex.conf    # a conf can carry a plaintext password; jq's
-                               # output would otherwise land world-readable
-VELRUNA_CONF=/tmp/reindex.conf velruna status | grep 'index:'   # must show velruna_new
-VELRUNA_CONF=/tmp/reindex.conf velruna add reindex:seed "placeholder" context_map -p velruna
+tmp=$(mktemp)                  # a fixed /tmp name can collide or be a planted
+                               # symlink; mktemp creates the file private (600)
+jq '.index_name = "velruna_new"' velruna.conf >"$tmp"
+VELRUNA_CONF="$tmp" velruna status | grep 'index:'   # must show velruna_new
+VELRUNA_CONF="$tmp" velruna add reindex:seed "placeholder" context_map -p velruna
+rm "$tmp"                            # the conf can carry a plaintext password
 
 # 2. Copy the documents. From here until the swap is done the store must
-#    stay quiet for writes. "conflicts": "proceed" keeps a mid-copy write
-#    from aborting the whole run; the skipped documents are counted, and
-#    the count is the operator's signal to redo the copy with the store
-#    idle.
+#    stay quiet for writes: _reindex reads a point-in-time snapshot of the
+#    source, so a fact updated mid-copy is copied as it was when the scroll
+#    passed it — neither the count check below nor the conflicts tally
+#    notices it. "conflicts": "proceed" only guards destination-side
+#    collisions (a same-_id clash in the target); with an empty target the
+#    tally stays 0 whatever happens in the source. The response fields are
+#    a sanity check, never a substitute for a quiet store.
 curl -u "$OS_USER" -H 'Content-Type: application/json' -X POST \
   http://localhost:9200/_reindex \
   -d '{"conflicts":"proceed","source":{"index":"velruna"},"dest":{"index":"velruna_new"}}'
 #    The response must report "version_conflicts": 0 and an empty
-#    "failures"; anything else means something moved during the copy.
+#    "failures". If step 2 has to be redone, DELETE velruna_new first (and
+#    clean its stray journal names as in step 5): re-copying into a
+#    populated target collides on every same-_id document.
 
 # 3. Verify the copy against the old store BEFORE removing anything: count
 #    documents on both sides. (Do not use `velruna list | wc -l`: list needs
@@ -430,11 +437,12 @@ curl -u "$OS_USER" -X DELETE http://localhost:9200/_ingest/pipeline/velruna_new-
 ```
 
 Writes must stay out of the store from step 2 through the alias write; the
-window between the DELETE and the alias is certainly downtime, but an
-update that lands during the reindex is invisible to the count check (the
-counts still match, the new index just holds a stale copy — only the
-version_conflicts tally catches it). A brand-new fact written during the
-copy is caught by the arithmetic: the placeholder is no longer the only
+window between the DELETE and the alias is certainly downtime. Nothing
+detects an update that lands during the copy: the reindex reads a
+snapshot, so the new index silently keeps the pre-update copy and the
+counts still match — quietness is a precondition of the recipe, not
+something its checks enforce. A brand-new fact written during the copy is
+caught by the arithmetic: the placeholder is no longer the only
 difference. If the store role cannot create indices or aliases, an
 administrator has to run these requests — that is the same permission
 boundary `status` reports when it prints `schema: unreadable (HTTP 403)`.
