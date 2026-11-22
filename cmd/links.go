@@ -28,20 +28,20 @@ func linksCheckCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "check",
 		Short: "Find dangling, unverified or cyclic superseded_by links",
-		Long: `Walk every fact that carries a superseded_by link and report the broken edges:
+		Long: fmt.Sprintf(`Walk every fact that carries a superseded_by link and report the broken edges:
 
   dangling    the target fact does not exist (a reader walks into nothing)
   unverified  the target fact exists but is not verified (obsolete or other)
   cycle       the edge is part of a superseded_by loop
 
-The scan is bounded (--limit, default 1000, max 10000 edges); a truncated
+The scan is bounded (--limit, default %d, max %d edges); a truncated
 scan says so. Exit codes distinguish outcomes: 0 when no findings exist
-(the summary line says when the graph was not fully audited), 1 when
+(the closing line says when the graph was not fully audited), 1 when
 findings exist, 2 when the check itself failed (unreachable store) —
 scripts can branch on them without parsing stderr. Repair a finding by
 repointing the source (velruna_patch superseded_by) or retiring it too.
 Run it occasionally; the write guards prevent most breaks but never all
-of them.`,
+of them.`, client.LinkScanDefault, client.LinkScanMax),
 		Args: cobra.NoArgs,
 		Run: func(cmd *cobra.Command, args []string) {
 			ctx := context.Background()
@@ -80,20 +80,28 @@ func linksSummaryLine(rep *client.LinksReport, limit int) string {
 		line += fmt.Sprintf(", %d hit(s) carried a superseded_by this client cannot read (not audited)", rep.Skipped)
 	}
 	// Only hits the store counted but the scan never returned are
-	// recoverable by --limit; unreadable hits were fetched already, and
-	// telling the operator to raise the limit for them is wrong advice
-	// (cf. fetch/journal, which treat skipped the same way).
+	// recoverable by --limit; unreadable hits were fetched already,
+	// and telling the operator to raise the limit for them is wrong
+	// advice (cf. fetch/journal, which treat skipped the same way).
+	// The +1 probe for "is there more" also counts as fetched, so it
+	// never shows up as missed; a trimmed probe edge is reported
+	// separately below.
 	if missed := rep.Total - rep.Fetched; missed > 0 {
 		effectiveLimit := limit
 		if effectiveLimit <= 0 {
 			effectiveLimit = client.LinkScanDefault
 		}
-		if effectiveLimit < client.LinkScanMax {
+		// The scan window is min(limit+1, max_result_window=10000),
+		// so raising stops changing anything from limit=9999 on.
+		if effectiveLimit < client.LinkScanMax-1 {
 			line += fmt.Sprintf(", %d edge(s) in the store not fetched (raise --limit)", missed)
 		} else {
-			line += fmt.Sprintf(", %d edge(s) in the store not fetched (--limit is at its %d cap)",
-				missed, client.LinkScanMax)
+			line += fmt.Sprintf(", %d edge(s) in the store not fetched (--limit already spans the 10000 result window)",
+				missed)
 		}
+	}
+	if trimmed := rep.Fetched - rep.Edges - rep.Skipped; trimmed > 0 {
+		line += fmt.Sprintf(", %d edge(s) fetched but left unaudited at --limit", trimmed)
 	}
 	return line
 }

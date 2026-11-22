@@ -36,11 +36,27 @@ func TestLinksSummaryLineCounts(t *testing.T) {
 		t.Errorf("not-fetched advice missing: %q", got)
 	}
 
-	// At the cap the advice must say the cap, not "raise --limit".
-	rep = &client.LinksReport{Edges: client.LinkScanMax, Fetched: client.LinkScanMax, Total: 12345, Truncated: true}
-	got = linksSummaryLine(rep, 20000)
-	if strings.Contains(got, "raise --limit") || !strings.Contains(got, "--limit is at its 10000 cap") {
-		t.Errorf("cap advice wrong: %q", got)
+	// At the cap the advice must say the window, not "raise --limit":
+	// from limit=9999 on the scan already asks for the whole result
+	// window, so raising cannot fetch another edge.
+	for _, lim := range []int{9999, 10000, 20000} {
+		rep = &client.LinksReport{Edges: client.LinkScanMax, Fetched: client.LinkScanMax, Total: 12345, Truncated: true}
+		got = linksSummaryLine(rep, lim)
+		if strings.Contains(got, "raise --limit") || !strings.Contains(got, "already spans the 10000 result window") {
+			t.Errorf("window-span advice wrong at --limit %d: %q", lim, got)
+		}
+	}
+
+	// A scan over a store of exactly limit+1 edges fetched everything but
+	// trimmed the +1 probe back: the summary must still show the gap the
+	// verdict's "NOT fully audited" points to.
+	rep = &client.LinksReport{Edges: 1000, Fetched: 1001, Total: 1001, Truncated: true}
+	got = linksSummaryLine(rep, 1000)
+	if !strings.Contains(got, "1 edge(s) fetched but left unaudited at --limit") {
+		t.Errorf("trimmed probe edge invisible in the summary: %q", got)
+	}
+	if strings.Contains(got, "raise --limit") {
+		t.Errorf("nothing was left unfetched, raise-advice wrong: %q", got)
 	}
 }
 

@@ -208,8 +208,32 @@ func TestCheckLinksTruncates(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CheckLinks: %v", err)
 	}
-	if rep.Edges != 5 || !rep.Truncated || rep.Total != 12 {
-		t.Errorf("edges=%d truncated=%v total=%d, want 5/true/12", rep.Edges, rep.Truncated, rep.Total)
+	if rep.Edges != 5 || !rep.Truncated || rep.Total != 12 || rep.Fetched != 6 {
+		t.Errorf("edges=%d truncated=%v total=%d fetched=%d, want 5/true/12/6",
+			rep.Edges, rep.Truncated, rep.Total, rep.Fetched)
+	}
+}
+
+// An empty keyword array and a null index no values at all: the store
+// behaves as if the field were absent. Such documents must not enter the
+// total, the window, or the Skipped count — and neither must they match
+// a term probe (the fake's termMatches and exists clauses are pinned here).
+func TestCheckLinksEmptyAndNullLinksAreNotEdges(t *testing.T) {
+	store := &supersedeStore{docs: map[string]string{
+		"a":   factJSON("a", "verified", "2026-01-01T00:00:00Z", "b"),
+		"b":   factJSON("b", "verified", "2026-01-01T00:00:00Z", ""),
+		"arr": `{"key":"arr","status":"verified","superseded_by":[]}`,
+		"nil": `{"key":"nil","status":"verified","superseded_by":null}`,
+	}}
+	c, _ := supersedeClient(t, store)
+
+	rep, err := c.CheckLinks(context.Background(), 0)
+	if err != nil {
+		t.Fatalf("CheckLinks: %v", err)
+	}
+	if rep.Total != 1 || rep.Fetched != 1 || rep.Edges != 1 || rep.Skipped != 0 || rep.Truncated {
+		t.Errorf("total=%d fetched=%d edges=%d skipped=%d truncated=%v, want 1/1/1/0/false",
+			rep.Total, rep.Fetched, rep.Edges, rep.Skipped, rep.Truncated)
 	}
 }
 
