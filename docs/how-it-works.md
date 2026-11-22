@@ -379,18 +379,21 @@ for the password instead of putting it in the command line or history.)
 #    creates the key; sed silently no-ops when the key is absent from the
 #    default file) — and verify it before writing anything:
 jq '.index_name = "velruna_new"' velruna.conf > /tmp/reindex.conf
+chmod 600 /tmp/reindex.conf    # a conf can carry a plaintext password; jq's
+                               # output would otherwise land world-readable
 VELRUNA_CONF=/tmp/reindex.conf velruna status | grep 'index:'   # must show velruna_new
 VELRUNA_CONF=/tmp/reindex.conf velruna add reindex:seed "placeholder" context_map -p velruna
 
 # 2. Copy the documents. From here until the swap is done the store must
-#    stay quiet for writes: _reindex skips documents whose version changed
-#    mid-copy (counted as version_conflicts) and would leave stale copies
-#    unnoticed.
+#    stay quiet for writes. "conflicts": "proceed" keeps a mid-copy write
+#    from aborting the whole run; the skipped documents are counted, and
+#    the count is the operator's signal to redo the copy with the store
+#    idle.
 curl -u "$OS_USER" -H 'Content-Type: application/json' -X POST \
   http://localhost:9200/_reindex \
-  -d '{"source":{"index":"velruna"},"dest":{"index":"velruna_new"}}'
-#    The response must report "version_conflicts": 0; anything else means
-#    something moved during the copy — redo step 2 with the store idle.
+  -d '{"conflicts":"proceed","source":{"index":"velruna"},"dest":{"index":"velruna_new"}}'
+#    The response must report "version_conflicts": 0 and an empty
+#    "failures"; anything else means something moved during the copy.
 
 # 3. Verify the copy against the old store BEFORE removing anything: count
 #    documents on both sides. (Do not use `velruna list | wc -l`: list needs
@@ -416,8 +419,9 @@ velruna status            # schema: v1  mapping: ok
 #    composable template velruna_new-journal and an ingest pipeline
 #    velruna_new-journal-ts. After the swap nothing reads them, and the
 #    seed fact's current_ref points into the stray index. Wildcard index
-#    deletes are rejected by default (action.destructive_requires_name),
-#    so resolve the names and delete exactly what is listed:
+#    deletes are allowed on stock OpenSearch but rejected on hardened
+#    clusters (action.destructive_requires_name=true) — resolve the names
+#    and delete exactly what is listed, which works either way:
 curl -u "$OS_USER" "http://localhost:9200/_cat/indices/velruna_new-history-*?h=index"
 curl -u "$OS_USER" -X DELETE http://localhost:9200/velruna_new-history-2026.11  # one per listed name
 curl -u "$OS_USER" -X DELETE http://localhost:9200/_index_template/velruna_new-journal
@@ -426,12 +430,14 @@ curl -u "$OS_USER" -X DELETE http://localhost:9200/_ingest/pipeline/velruna_new-
 ```
 
 Writes must stay out of the store from step 2 through the alias write; the
-window between the DELETE and the alias is certainly downtime, but a write
-that lands during the reindex is invisible to the count check (it just
-doesn't make it into the copy). If the store role cannot create indices or
-aliases, an administrator has to run these requests — that is the same
-permission boundary `status` reports when it prints
-`schema: unreadable (HTTP 403)`.
+window between the DELETE and the alias is certainly downtime, but an
+update that lands during the reindex is invisible to the count check (the
+counts still match, the new index just holds a stale copy — only the
+version_conflicts tally catches it). A brand-new fact written during the
+copy is caught by the arithmetic: the placeholder is no longer the only
+difference. If the store role cannot create indices or aliases, an
+administrator has to run these requests — that is the same permission
+boundary `status` reports when it prints `schema: unreadable (HTTP 403)`.
 
 ## Re-verification (`confirmed_by`)
 
