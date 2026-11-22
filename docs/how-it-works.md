@@ -362,12 +362,19 @@ instead of hiding them.
 ### Re-indexing a drifted store
 
 Field types are immutable, so the fix is a fresh index. Take a snapshot first
-([docs/backup.md](backup.md)) — a wrong `_reindex` loses the store:
+([docs/backup.md](backup.md)) — a wrong `_reindex` loses the store. Prefer the
+alias route below: journal index names derive from `index_name`, so **simply
+renaming `index_name` in the config would orphan `velruna-history-*`** — every
+migrated fact's journal would read empty while `current_ref` points into an
+index nothing reads.
 
 ```bash
 # 1. Create the target index with the current mapping: one write under a new
-#    name (a copy of the config with index_name set to velruna_new).
-cp velruna.conf /tmp/reindex.conf && sed -i 's/"index_name": *"velruna"/"index_name": "velruna_new"/' /tmp/reindex.conf
+#    name. Use a config where index_name is DEFINITELY set (jq rewrites or
+#    creates the key; sed silently no-ops when the key is absent from the
+#    default file) — and verify it before writing anything:
+jq '.index_name = "velruna_new"' velruna.conf > /tmp/reindex.conf
+VELRUNA_CONF=/tmp/reindex.conf velruna status | grep 'index:'   # must show velruna_new
 VELRUNA_CONF=/tmp/reindex.conf velruna add reindex:seed "placeholder" context_map -p velruna
 
 # 2. Copy the documents (the placeholder can be removed afterwards).
@@ -375,19 +382,22 @@ curl -u "$OS_USER" -H 'Content-Type: application/json' -X POST \
   http://localhost:9200/_reindex \
   -d '{"source":{"index":"velruna"},"dest":{"index":"velruna_new"}}'
 
-# 3. Point the config at the new index, then drop the old one once reads agree.
-#    (An alias works too, if you prefer the name to stay velruna.)
-sed -i 's/"index_name": *"velruna"/"index_name": "velruna_new"/' velruna.conf
-velruna status            # schema: v1  mapping: ok
-velruna list | wc -l
+# 3. Verify reads against the old count BEFORE removing anything:
+VELRUNA_CONF=/tmp/reindex.conf velruna list | wc -l
+
+# 4. Swap the name atomically from the operator's side: drop the old index and
+#    point an ALIAS of the old name at the new index. The config never changes,
+#    so journal indices (velruna-history-*) keep working untouched.
 curl -u "$OS_USER" -X DELETE http://localhost:9200/velruna
+curl -u "$OS_USER" -H 'Content-Type: application/json' -X PUT http://localhost:9200/_aliases \
+  -d '{"actions":[{"add":{"index":"velruna_new","alias":"velruna"}}]}'
+velruna status            # schema: v1  mapping: ok
 ```
 
-Journal indices (`velruna-history-*`) keep their own templates and are not
-touched by this; they are recreated from the template on the next write. If the
-store role cannot create indices, an administrator has to run these requests —
-that is the same permission boundary `status` reports when it prints
-`schema: unreadable (HTTP 403)`.
+The window between the DELETE and the alias write is downtime: no writes may
+reach the store during it. If the store role cannot create indices or aliases,
+an administrator has to run these requests — that is the same permission
+boundary `status` reports when it prints `schema: unreadable (HTTP 403)`.
 
 ## Re-verification (`confirmed_by`)
 

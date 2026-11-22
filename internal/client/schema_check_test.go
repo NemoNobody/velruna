@@ -16,6 +16,10 @@ func mappingBodyFrom(t *testing.T, marker *int, overrides map[string]string) str
 	for name, ty := range overrides {
 		types[name] = ty
 	}
+	return mappingBody(t, map[string]map[string]any{"velruna": mappingIndex(marker, propsFromTypes(types))})
+}
+
+func propsFromTypes(types map[string]string) map[string]map[string]any {
 	props := map[string]map[string]any{}
 	for name, ty := range types {
 		if ty == "?" {
@@ -27,13 +31,23 @@ func mappingBodyFrom(t *testing.T, marker *int, overrides map[string]string) str
 		}
 		props[name] = map[string]any{"type": ty}
 	}
+	return props
+}
+
+// mappingIndex renders one index's mappings block.
+func mappingIndex(marker *int, props map[string]map[string]any) map[string]any {
 	meta := map[string]any{}
 	if marker != nil {
 		meta[schemaMetaKey] = *marker
 	}
-	body, err := json.Marshal(map[string]any{
-		"velruna": map[string]any{"mappings": map[string]any{"_meta": meta, "properties": props}},
-	})
+	return map[string]any{"mappings": map[string]any{"_meta": meta, "properties": props}}
+}
+
+// mappingBody renders a GET /_mapping response over several indices (an alias
+// resolves to more than one).
+func mappingBody(t *testing.T, indices map[string]map[string]any) string {
+	t.Helper()
+	body, err := json.Marshal(indices)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -153,5 +167,74 @@ func TestSchemaCheck_NonNumericMarkerIsUnknown(t *testing.T) {
 	rep := c.SchemaCheck(context.Background())
 	if !strings.Contains(rep.Schema, "not a number") {
 		t.Errorf("schema = %q, want the unknown-marker verdict", rep.Schema)
+	}
+}
+
+// HTTP 200 with an empty object means the name resolved to no indices at all
+// (an alias without backing). That is absence, not "unversioned": the storage
+// line in the same status output already says index=absent, and claiming
+// otherwise prints two contradictory rows.
+func TestSchemaCheck_EmptyBodyIsAbsent(t *testing.T) {
+	c, _ := newFakeClient(t, func(r recordedRequest) (int, string) {
+		return http.StatusOK, `{}`
+	})
+	rep := c.SchemaCheck(context.Background())
+	if !rep.IndexAbsent || !strings.HasPrefix(rep.Schema, "absent") || rep.Mapping != "" {
+		t.Errorf("empty mapping body reported wrongly: %+v", rep)
+	}
+}
+
+// Fields the store carries that this binary does not know are NOT drift: the
+// opposite direction (store older than binary) is additive, and a store from
+// a newer scheme legitimately has extra fields.
+func TestSchemaCheck_ExtraStoreFieldsAreNotDrift(t *testing.T) {
+	v := SchemaVersion
+	props := propsFromTypes(expectedFieldTypes())
+	props["future_field"] = map[string]any{"type": "keyword"}
+	c, _ := newFakeClient(t, func(r recordedRequest) (int, string) {
+		return http.StatusOK, mappingBody(t, map[string]map[string]any{"velruna": mappingIndex(&v, props)})
+	})
+	rep := c.SchemaCheck(context.Background())
+	if rep.Mapping != "ok" {
+		t.Errorf("extra store field reported as drift: %q", rep.Mapping)
+	}
+}
+
+// An alias over two backing indices: the newest marker wins, and properties
+// merge in sorted-name order (first definition wins). This pins that merge
+// semantics so a future change is a decision, not an accident.
+func TestSchemaCheck_AliasMerge(t *testing.T) {
+	v := SchemaVersion
+	clean := propsFromTypes(expectedFieldTypes())
+	old := propsFromTypes(expectedFieldTypes())
+	old["keywords"] = map[string]any{"type": "text"}
+	c, _ := newFakeClient(t, func(r recordedRequest) (int, string) {
+		return http.StatusOK, mappingBody(t, map[string]map[string]any{
+			"a_old": mappingIndex(nil, old),
+			"z_new": mappingIndex(&v, clean),
+		})
+	})
+	rep := c.SchemaCheck(context.Background())
+	if rep.Schema != "v1" {
+		t.Errorf("marker across aliases = %q, want v1 (newest wins)", rep.Schema)
+	}
+	if !strings.Contains(rep.Mapping, "keywords: text") {
+		t.Errorf("merge should surface the old backing's pinned type; mapping = %q", rep.Mapping)
+	}
+}
+
+// A typeless property with children is an object, not a text leaf: naming the
+// drift label wrongly sends the operator chasing the wrong field shape.
+func TestSchemaCheck_TypelessObjectIsLabelledObject(t *testing.T) {
+	v := SchemaVersion
+	props := propsFromTypes(expectedFieldTypes())
+	delete(props, "confirmed_by")
+	props["confirmed_by"] = map[string]any{"properties": map[string]any{"author": map[string]any{"type": "keyword"}}}
+	c, _ := newFakeClient(t, func(r recordedRequest) (int, string) {
+		return http.StatusOK, mappingBody(t, map[string]map[string]any{"velruna": mappingIndex(&v, props)})
+	})
+	rep := c.SchemaCheck(context.Background())
+	if !strings.Contains(rep.Mapping, "confirmed_by: object, want object(disabled)") {
+		t.Errorf("drift label = %q, want the object verdict for confirmed_by", rep.Mapping)
 	}
 }

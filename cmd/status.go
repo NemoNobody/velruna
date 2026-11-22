@@ -510,7 +510,11 @@ func printSchema(w io.Writer, rep statusReport) error {
 		b.WriteString(rep.Mapping)
 	}
 	b.WriteString("\n")
-	if rep.SchemaHint != "" && rep.Mapping != "ok" {
+	// The hint belongs to whichever half is not clean: a store stamped by a
+	// newer binary maps "ok" for the fields it shares with this one, and
+	// swallowing the hint there hides the one verdict the operator needs.
+	cleanSchema := "v" + strconv.Itoa(client.SchemaVersion)
+	if rep.SchemaHint != "" && (rep.Mapping != "ok" || rep.Schema != cleanSchema) {
 		b.WriteString("  hint: ")
 		b.WriteString(rep.SchemaHint)
 		b.WriteString("\n")

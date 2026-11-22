@@ -29,8 +29,9 @@ type SchemaReport struct {
 // storedMappingField is the part of a stored mapping property this check
 // cares about. A disabled object carries no "type" in the response.
 type storedMappingField struct {
-	Type    string `json:"type"`
-	Enabled *bool  `json:"enabled"`
+	Type       string                     `json:"type"`
+	Enabled    *bool                      `json:"enabled"`
+	Properties map[string]json.RawMessage `json:"properties"`
 }
 
 // SchemaCheck reads the facts index mapping once and reports the schema
@@ -73,6 +74,14 @@ func (c *Client) SchemaCheck(ctx context.Context) *SchemaReport {
 	if err := json.Unmarshal([]byte(body), &res); err != nil {
 		return &SchemaReport{Schema: "unreadable (the mapping response did not parse)",
 			Hint: "the store answered something unexpected: check the OpenSearch version"}
+	}
+	if len(res) == 0 {
+		// The store answers 200 with an empty object when the name resolves to
+		// no indices at all (an alias without backing, a name nothing created):
+		// there is no mapping to judge. Saying "unversioned" here would
+		// contradict the storage line in the same status output.
+		return &SchemaReport{Schema: "absent (no facts index yet)", IndexAbsent: true,
+			Hint: "the index is created with the current schema on the first write"}
 	}
 
 	names := make([]string, 0, len(res))
@@ -185,7 +194,12 @@ func storedType(f storedMappingField) string {
 		return "object(disabled)"
 	}
 	if f.Type == "" {
-		return "text" // OpenSearch defaults a bare {fields:...} leaf to text
+		// A typeless property with children is an object; a bare
+		// {fields:...} leaf is what OpenSearch defaults to text.
+		if len(f.Properties) > 0 {
+			return "object"
+		}
+		return "text"
 	}
 	return f.Type
 }
