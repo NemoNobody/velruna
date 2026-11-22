@@ -6,7 +6,7 @@ under `## Unreleased`; the release commit moves that section under its version
 number (`.github/workflows/release.yml` reads the heading to build the release
 notes).
 
-## Unreleased
+## v0.9.0 — 2026-11-22
 
 ### Added
 
@@ -28,8 +28,10 @@ notes).
   without a proxy in front of it. `status` reports the list; an unreachable
   store now suggests where to look.
 - a schema version stamped into the facts index (`mappings._meta`: `SchemaVersion = 1`):
-  a store written by a newer binary is refused before anything is written,
-  while a store from an older one is upgraded in place (additive mapping).
+  a store written by a newer binary is refused once the stored version is read
+  (upgrade the binary; if the role cannot read mappings the check is skipped rather
+  than guessed), while a store from an older one is upgraded in place (additive
+  mapping).
 - deployment: a secured stack profile with Dashboards (`secure-dash`), server
   knobs (`VELRUNA_OS_HEAP`, `VELRUNA_CLUSTER_SEEDS`), and a
   `workflow_dispatch` smoke pipeline that boots the single-node stack, runs
