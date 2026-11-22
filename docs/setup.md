@@ -216,6 +216,32 @@ Create `~/.velruna.conf`:
 chmod 600 ~/.velruna.conf
 ```
 
+### Several nodes (a real cluster)
+
+Point the client at more than one node and it round-robins between them, so one
+unreachable node costs a retry instead of an outage — no proxy or load balancer
+in front:
+
+```json
+{
+  "opensearch_urls": [
+    "https://os1.example:9200",
+    "https://os2.example:9200",
+    "https://os3.example:9200"
+  ]
+}
+```
+
+- `OPENSEARCH_URLS` (comma-separated) overrides the file list; `opensearch_url`
+  stays valid for a single node and is used when the list is empty.
+- Credentials and TLS settings are shared by every node — one user, one store.
+  The keyring account is derived from the **first** address, so keep that node
+  first if you reorder the list.
+- Each entry gets the same validation as `opensearch_url` (no user info in the
+  URL, host required); one bad entry fails the config load with its index.
+- `velruna status` prints the whole list (`urls`) and the MCP `velruna_status`
+  reports it too.
+
 - Leave `opensearch_password` out of the file: store the password in the OS
   keyring with `velruna creds set` (run it in a terminal — it prompts for the
   password; the password is never an argument, so it never ends up in shell

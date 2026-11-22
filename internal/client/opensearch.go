@@ -6,9 +6,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 	"unicode/utf8"
 
@@ -90,7 +92,7 @@ func NewClient(cfg *config.Config) (*Client, error) {
 	}
 	api, err := opensearchapi.NewClient(opensearchapi.Config{
 		Client: opensearch.Config{
-			Addresses:          []string{cfg.OpenSearchURL},
+			Addresses:          cfg.EffectiveURLs(),
 			Username:           cfg.OpenSearchUser,
 			Password:           cfg.OpenSearchPassword,
 			InsecureSkipVerify: cfg.InsecureSkipVerify,
@@ -101,6 +103,25 @@ func NewClient(cfg *config.Config) (*Client, error) {
 		return nil, fmt.Errorf("create opensearch client: %w", err)
 	}
 	return &Client{api: api, cfg: cfg}, nil
+}
+
+// storeHint turns the first-run failure ("nothing is listening") into an
+// instruction. Every other error already names what it failed at; this one is
+// the one a new user hits, and the bare dial error does not say how to get a
+// store.
+func (c *Client) storeHint(err error) error {
+	if err == nil {
+		return nil
+	}
+	var netErr net.Error
+	if !errors.As(err, &netErr) && !errors.Is(err, syscall.ECONNREFUSED) {
+		return err
+	}
+	return fmt.Errorf("%w\nno OpenSearch answered at %s. Start one with `make dev-opensearch` "+
+		"(this repository) or\n  docker run -d -p 9200:9200 -e discovery.type=single-node "+
+		"-e DISABLE_SECURITY_PLUGIN=true opensearchproject/opensearch:3.8.0\n"+
+		"then point opensearch_url / opensearch_urls at it (docs/setup.md, section 1-2)",
+		err, strings.Join(c.cfg.EffectiveURLs(), ", "))
 }
 
 // isNotFound reports whether err is an HTTP 404 from OpenSearch. The client
@@ -341,7 +362,7 @@ func (c *Client) EnsureIndex(ctx context.Context) error {
 		// instead of the error type because a HEAD response has no body, so the
 		// client cannot parse it into a typed error.
 	default:
-		return fmt.Errorf("check index %s: %w", c.cfg.IndexName, err)
+		return c.storeHint(fmt.Errorf("check index %s: %w", c.cfg.IndexName, err))
 	}
 
 	body, _ := json.Marshal(buildIndexBody(c.indexReplicas(ctx)))

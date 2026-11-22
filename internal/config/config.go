@@ -53,11 +53,16 @@ const DefaultFetchUserAgent = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.3
 
 // Config holds configuration for the velruna CLI.
 type Config struct {
-	OpenSearchURL      string `json:"opensearch_url"`
-	OpenSearchUser     string `json:"opensearch_user"`
-	OpenSearchPassword string `json:"opensearch_password"`
-	InsecureSkipVerify bool   `json:"insecure_skip_verify"`
-	IndexName          string `json:"index_name"`
+	OpenSearchURL string `json:"opensearch_url"`
+	// OpenSearchURLs lists every node of the cluster. The client round-robins
+	// over them, so one dead node costs a retry, not an outage, and no proxy is
+	// needed to reach a multi-node cluster. Empty means "just OpenSearchURL".
+	// Credentials and TLS settings are shared: one user, one store.
+	OpenSearchURLs     []string `json:"opensearch_urls,omitempty"`
+	OpenSearchUser     string   `json:"opensearch_user"`
+	OpenSearchPassword string   `json:"opensearch_password"`
+	InsecureSkipVerify bool     `json:"insecure_skip_verify"`
+	IndexName          string   `json:"index_name"`
 
 	// HistoryLimit is the default keep-N for `prune`. It no longer trims on
 	// write: corrections append to the journal index without a bound
@@ -313,6 +318,9 @@ func loadConfig(explicitPath string, finder func() string) (*Config, error) {
 	if url := os.Getenv("OPENSEARCH_URL"); url != "" {
 		cfg.OpenSearchURL = url
 	}
+	if urls := os.Getenv("OPENSEARCH_URLS"); urls != "" {
+		cfg.OpenSearchURLs = splitURLList(urls)
+	}
 	if user := os.Getenv("OPENSEARCH_USER"); user != "" {
 		cfg.OpenSearchUser = user
 	}
@@ -509,27 +517,14 @@ func loadConfig(explicitPath string, finder func() string) (*Config, error) {
 		}
 		cfg.LocalRepoScanDepth = n
 	}
-	u, uerr := url.Parse(cfg.OpenSearchURL)
-	if uerr != nil {
-		// A url that fails to parse must not flow into the config: the client
-		// errors would echo the raw text (url.Parse's error quotes the input),
-		// and a credential-carrying url usually fails to parse on purpose
-		// (percent-escapes, spaces in the password). No echo in either case.
-		if strings.Contains(cfg.OpenSearchURL, "@") {
-			return nil, fmt.Errorf("opensearch_url is not a valid url: it carries user info; put the user in opensearch_user and the password in the keyring/env (its text is not echoed)")
+	for i, raw := range cfg.EffectiveURLs() {
+		label := "opensearch_url"
+		if len(cfg.OpenSearchURLs) > 0 {
+			label = fmt.Sprintf("opensearch_urls[%d]", i)
 		}
-		return nil, fmt.Errorf("opensearch_url is not a valid url: %w", uerr)
-	}
-	if u.User != nil {
-		// Credentials embedded in the URL reach every error message, the
-		// status output and the store server as basic-auth material. The
-		// fetch path refuses them for the same reason (NormalizeURL).
-		return nil, fmt.Errorf("opensearch_url carries user info; put the user in opensearch_user and the password in the keyring/env (url: %s)", RedactURL(cfg.OpenSearchURL))
-	}
-	if u.Host == "" {
-		// "https://" parses fine and fails loudly only at request time;
-		// refusing at load keeps the failure where the typo was made.
-		return nil, fmt.Errorf("opensearch_url has no host (url: %s): expected scheme://host:port", RedactURL(cfg.OpenSearchURL))
+		if err := validateStoreURL(label, raw); err != nil {
+			return nil, err
+		}
 	}
 	resolvePassword(cfg)
 	if err := ValidateProxyURL(cfg.FetchProxyURL); err != nil {
@@ -620,7 +615,7 @@ func resolvePassword(cfg *Config) {
 		cfg.PasswordSource = "env"
 		return
 	}
-	if pw, err := keyring.Get(KeyringService, KeyringAccount(cfg.OpenSearchURL)); err == nil && pw != "" {
+	if pw, err := keyring.Get(KeyringService, KeyringAccount(cfg.EffectiveURLs()[0])); err == nil && pw != "" {
 		cfg.OpenSearchPassword = pw
 		cfg.PasswordSource = "keyring"
 		return
@@ -635,6 +630,58 @@ func resolvePassword(cfg *Config) {
 	}
 	cfg.OpenSearchPassword = ""
 	cfg.PasswordSource = "none"
+}
+
+// splitURLList parses a comma- or whitespace-separated list of node URLs.
+// Empty entries are dropped so a trailing comma is not an error.
+func splitURLList(raw string) []string {
+	fields := strings.FieldsFunc(raw, func(r rune) bool {
+		return r == ',' || r == ' ' || r == '\t' || r == '\n'
+	})
+	out := make([]string, 0, len(fields))
+	for _, f := range fields {
+		if s := strings.TrimSpace(f); s != "" {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+// EffectiveURLs is the node list the client dials: the explicit list when set,
+// otherwise the single opensearch_url.
+func (c *Config) EffectiveURLs() []string {
+	if len(c.OpenSearchURLs) > 0 {
+		return c.OpenSearchURLs
+	}
+	return []string{c.OpenSearchURL}
+}
+
+// validateStoreURL rejects a node address that cannot be used, applying the
+// credential rules to every entry of a multi-node list.
+func validateStoreURL(label, raw string) error {
+	u, uerr := url.Parse(raw)
+	if uerr != nil {
+		// A url that fails to parse must not flow into the config: the client
+		// errors would echo the raw text (url.Parse's error quotes the input),
+		// and a credential-carrying url usually fails to parse on purpose
+		// (percent-escapes, spaces in the password). No echo in either case.
+		if strings.Contains(raw, "@") {
+			return fmt.Errorf("%s is not a valid url: it carries user info; put the user in opensearch_user and the password in the keyring/env (its text is not echoed)", label)
+		}
+		return fmt.Errorf("%s is not a valid url: %w", label, uerr)
+	}
+	if u.User != nil {
+		// Credentials embedded in the URL reach every error message, the
+		// status output and the store server as basic-auth material. The
+		// fetch path refuses them for the same reason (NormalizeURL).
+		return fmt.Errorf("%s carries user info; put the user in opensearch_user and the password in the keyring/env (url: %s)", label, RedactURL(raw))
+	}
+	if u.Host == "" {
+		// "https://" parses fine and fails loudly only at request time;
+		// refusing at load keeps the failure where the typo was made.
+		return fmt.Errorf("%s has no host (url: %s): expected scheme://host:port", label, RedactURL(raw))
+	}
+	return nil
 }
 
 // KeyringAccount derives the keyring account (host[:port]) from the URL so
@@ -668,6 +715,7 @@ func KeyringAccount(rawURL string) string {
 // distinguishable from an explicit true (opt in to unverified TLS).
 type fileConfig struct {
 	OpenSearchURL       string   `json:"opensearch_url"`
+	OpenSearchURLs      []string `json:"opensearch_urls"`
 	OpenSearchUser      string   `json:"opensearch_user"`
 	OpenSearchPassword  string   `json:"opensearch_password"`
 	InsecureSkipVerify  *bool    `json:"insecure_skip_verify"`
@@ -742,6 +790,9 @@ func loadFile(cfg *Config, path string) error {
 	}
 	if c.OpenSearchURL != "" {
 		cfg.OpenSearchURL = c.OpenSearchURL
+	}
+	if len(c.OpenSearchURLs) > 0 {
+		cfg.OpenSearchURLs = c.OpenSearchURLs
 	}
 	if c.OpenSearchUser != "" {
 		cfg.OpenSearchUser = c.OpenSearchUser

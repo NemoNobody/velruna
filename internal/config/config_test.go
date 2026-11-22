@@ -842,3 +842,42 @@ func setHome(t *testing.T, dir string) {
 	t.Setenv("HOME", dir)
 	t.Setenv("USERPROFILE", dir)
 }
+
+func TestEffectiveURLs(t *testing.T) {
+	cfg := DefaultConfig()
+	if got := cfg.EffectiveURLs(); len(got) != 1 || got[0] != cfg.OpenSearchURL {
+		t.Errorf("default EffectiveURLs = %v, want just opensearch_url", got)
+	}
+	cfg.OpenSearchURLs = []string{"https://a:9200", "https://b:9200"}
+	if got := cfg.EffectiveURLs(); len(got) != 2 || got[1] != "https://b:9200" {
+		t.Errorf("EffectiveURLs = %v, want the explicit list", got)
+	}
+}
+
+func TestSplitURLList(t *testing.T) {
+	got := splitURLList(" https://a:9200 , https://b:9200,\nhttps://c:9200 ")
+	want := []string{"https://a:9200", "https://b:9200", "https://c:9200"}
+	if len(got) != len(want) {
+		t.Fatalf("splitURLList = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("splitURLList[%d] = %q, want %q", i, got[i], want[i])
+		}
+	}
+}
+
+// Every node address gets the same credential rules: one bad entry in the list
+// must fail the load, not surface as a confusing dial error at request time.
+func TestValidateStoreURLRejectsCredentials(t *testing.T) {
+	for _, raw := range []string{"https://user:pw@os:9200", "https://", "://nope", "os:9200"} {
+		if err := validateStoreURL("opensearch_urls[0]", raw); err == nil {
+			t.Errorf("validateStoreURL(%q) accepted an unusable address", raw)
+		}
+	}
+	for _, raw := range []string{"https://os:9200", "http://127.0.0.1:9200"} {
+		if err := validateStoreURL("opensearch_url", raw); err != nil {
+			t.Errorf("validateStoreURL(%q) = %v, want nil", raw, err)
+		}
+	}
+}

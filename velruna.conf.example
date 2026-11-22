@@ -1,5 +1,6 @@
 {
   "opensearch_url": "https://127.0.0.1:9200",
+  "opensearch_urls": [],
   "opensearch_user": "your-user",
   "insecure_skip_verify": false,
   "index_name": "velruna",

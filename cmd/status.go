@@ -21,6 +21,7 @@ import (
 // LoadConfigFrom.
 var statusEnvVars = []string{
 	"OPENSEARCH_URL",
+	"OPENSEARCH_URLS",
 	"OPENSEARCH_USER",
 	"OPENSEARCH_PASSWORD",
 	"OPENSEARCH_INSECURE_SKIP_VERIFY",
@@ -81,6 +82,7 @@ type statusReport struct {
 	Commit             string               `json:"commit,omitempty" jsonschema:"git commit this binary was stamped from (release/dev builds); empty for plain source builds"`
 	StartedAt          string               `json:"started_at" jsonschema:"RFC3339 when this MCP server process started (a restart after an update moves it)"`
 	URL                string               `json:"url" jsonschema:"the OpenSearch URL that was tried"`
+	URLs               []string             `json:"urls,omitempty" jsonschema:"every node address the client dials (a cluster may list several); absent when only one is configured"`
 	Index              string               `json:"index" jsonschema:"the index name used for facts"`
 	HistoryIndexPeriod string               `json:"history_index_period" jsonschema:"date granularity of the journal indices: day | week | month | quarter | year"`
 	HistoryLimit       int                  `json:"history_limit" jsonschema:"default keep for 'prune' (the journal itself is write-forever); 0 demands an explicit keep"`
@@ -185,7 +187,14 @@ func collectStatus(ctx context.Context, confPath string, noCWD bool) statusRepor
 		rep.Hint = "Fix the config file (or point --conf / VELRUNA_CONF at a valid one). See docs/setup.md."
 		return rep
 	}
-	rep.URL = config.RedactURL(cfg.OpenSearchURL)
+	urls := cfg.EffectiveURLs()
+	rep.URL = config.RedactURL(urls[0])
+	if len(urls) > 1 {
+		rep.URLs = make([]string, 0, len(urls))
+		for _, u := range urls {
+			rep.URLs = append(rep.URLs, config.RedactURL(u))
+		}
+	}
 	rep.Index = cfg.IndexName
 	rep.HistoryIndexPeriod = cfg.HistoryIndexPeriod
 	rep.HistoryLimit = cfg.HistoryLimit
@@ -359,6 +368,10 @@ func printStatus(w io.Writer, rep statusReport) error {
 	b.WriteString(rep.StartedAt)
 	b.WriteString("\nurl: ")
 	b.WriteString(rep.URL)
+	if len(rep.URLs) > 1 {
+		b.WriteString("\nurls: ")
+		b.WriteString(strings.Join(rep.URLs, ", "))
+	}
 	b.WriteString("\nindex: ")
 	b.WriteString(rep.Index)
 	b.WriteString("\nhistory_index_period: ")
