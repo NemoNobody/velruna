@@ -183,7 +183,7 @@ const maxInfraGates = 512
 // retry, or a long-lived MCP server would append journal entries forever
 // without the template's mappings and the server-clock pipeline.
 func (c *Client) ensureJournalInfra(ctx context.Context) error {
-	gate := infraGate("journal|" + c.cfg.OpenSearchURL + "|" + c.cfg.IndexName)
+	gate := infraGate("journal|" + c.storeKey() + "|" + c.cfg.IndexName)
 	// The lock makes a concurrent append wait for the first pass instead of
 	// skipping it: an entry written before the template exists would land on an
 	// index without the ingest pipeline and the stamped replica count.
@@ -343,7 +343,7 @@ func (c *Client) appendJournalID(ctx context.Context, e *model.JournalEntry, id 
 // template (which wires the pipeline), so nothing more is needed. One
 // idempotent settings PUT per index per process.
 func (c *Client) ensureJournalIndexPipeline(ctx context.Context, index string) error {
-	gate := infraGate("pipeline|" + c.cfg.OpenSearchURL + "|" + c.cfg.IndexName + "|" + index)
+	gate := infraGate("pipeline|" + c.storeKey() + "|" + c.cfg.IndexName + "|" + index)
 	// Wait, do not skip: an append that proceeds before the pipeline is pinned
 	// writes an entry without ingest_at, which sorts last and becomes the first
 	// prune victim.

@@ -112,7 +112,7 @@ func TestStatusEnvVarsMatchConfig(t *testing.T) {
 		t.Fatalf("read config.go: %v", err)
 	}
 	reads := map[string]bool{}
-	for _, m := range regexp.MustCompile(`os\.Getenv\("([A-Z0-9_]+)"\)`).FindAllStringSubmatch(string(src), -1) {
+	for _, m := range regexp.MustCompile(`os\.(?:Getenv|LookupEnv)\("([A-Z0-9_]+)"\)`).FindAllStringSubmatch(string(src), -1) {
 		reads[m[1]] = true
 	}
 	if len(reads) < 20 {

@@ -58,7 +58,7 @@ func (c *Client) autoReplicas(ctx context.Context) (int, bool) {
 var reconciledStores sync.Map
 
 func storeAlreadyReconciled(cfg *config.Config) bool {
-	_, loaded := reconciledStores.LoadOrStore(cfg.OpenSearchURL+"|"+cfg.IndexName, struct{}{})
+	_, loaded := reconciledStores.LoadOrStore(storeKey(cfg)+"|"+cfg.IndexName, struct{}{})
 	return loaded
 }
 
@@ -74,7 +74,7 @@ func (c *Client) reconcileReplicas(ctx context.Context) {
 	if !ok {
 		// Unknown topology: do not consume the process-wide claim, the next
 		// client may get a trustworthy probe.
-		reconciledStores.Delete(c.cfg.OpenSearchURL + "|" + c.cfg.IndexName)
+		reconciledStores.Delete(c.storeKey() + "|" + c.cfg.IndexName)
 		return
 	}
 	c.replicasFixOnce.Do(func() {

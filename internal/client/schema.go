@@ -3,7 +3,6 @@ package client
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"net/http"
 )
 
@@ -35,7 +34,7 @@ const schemaMetaKey = "velruna_schema"
 //
 // An error means one thing only: the store carries a newer schema.
 func (c *Client) ensureSchemaVersion(ctx context.Context) (checked bool, err error) {
-	gate := infraGate("schema|" + c.cfg.OpenSearchURL + "|" + c.cfg.IndexName)
+	gate := infraGate("schema|" + c.storeKey() + "|" + c.cfg.IndexName)
 	gate.mu.Lock()
 	defer gate.mu.Unlock()
 	if gate.done {
@@ -95,7 +94,7 @@ func (c *Client) ensureSchemaVersion(ctx context.Context) (checked bool, err err
 		}
 	}
 	if found > SchemaVersion {
-		return false, fmt.Errorf("the store at %s was written by a newer velruna (schema %d, this binary "+
+		return false, contractErrorf("the store at %s was written by a newer velruna (schema %d, this binary "+
 			"understands %d): upgrade the binary before using this store", c.endpointLabel(), found, SchemaVersion)
 	}
 	gate.done = true

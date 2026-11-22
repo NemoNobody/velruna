@@ -251,6 +251,17 @@ func wrapWriteError(op string, err error) error {
 	return fmt.Errorf("%s: %w", op, err)
 }
 
+func (c *Client) storeKey() string { return storeKey(c.cfg) }
+
+// storeKey identifies the store behind the process-wide gates (schema,
+// mapping, journal infra, replicas, author cache). It must derive from the
+// EFFECTIVE node list: a list-only config leaves OpenSearchURL at the unused
+// default, so keying on it would make a long-lived process treat a different
+// cluster as "already checked".
+func storeKey(cfg *config.Config) string {
+	return strings.Join(cfg.EffectiveURLs(), ",")
+}
+
 // endpointLabel names the store in diagnostics: every configured node, not
 // the single url a list-only config leaves at its default.
 func (c *Client) endpointLabel() string {
@@ -273,7 +284,7 @@ func (c *Client) Info(ctx context.Context) (*opensearchapi.InfoResp, error) {
 }
 
 // URL returns the configured OpenSearch URL.
-func (c *Client) URL() string { return c.cfg.OpenSearchURL }
+func (c *Client) URL() string { return c.cfg.EffectiveURLs()[0] }
 
 // IndexName returns the configured index name.
 func (c *Client) IndexName() string { return c.cfg.IndexName }

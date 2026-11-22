@@ -80,7 +80,7 @@ func authorCacheFor(storeURL, user string) *authorCache {
 }
 
 func (c *Client) resolveAuthor(ctx context.Context) AuthorInfo {
-	cache := authorCacheFor(c.cfg.OpenSearchURL, c.cfg.OpenSearchUser)
+	cache := authorCacheFor(c.storeKey(), c.cfg.OpenSearchUser)
 	cache.mu.Lock()
 	now := time.Now()
 	if cache.resolved &&

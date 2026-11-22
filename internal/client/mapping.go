@@ -27,7 +27,7 @@ import (
 // and writes stay correct, only the type best-effort degrades, and an operator
 // can see the real types in GET _mapping.
 func (c *Client) reconcileMapping(ctx context.Context) error {
-	gate := infraGate("mapping|" + c.cfg.OpenSearchURL + "|" + c.cfg.IndexName)
+	gate := infraGate("mapping|" + c.storeKey() + "|" + c.cfg.IndexName)
 	gate.mu.Lock()
 	defer gate.mu.Unlock()
 	if gate.done {

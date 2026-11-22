@@ -352,7 +352,13 @@ func (s *mcpServer) newClientWithConfig(ctx context.Context) (*client.Client, *c
 
 // storeError marks a failure as an availability problem rather than an empty
 // result, so an agent reports it instead of treating "nothing" as the answer.
+// A contract refusal (a schema newer than this binary, a request the store
+// would reject) already says what to do and must not be padded with "check
+// the store": the store is fine, the binary (or the request) is not.
 func storeError(op string, err error) error {
+	if errors.Is(err, client.ErrContract) {
+		return err
+	}
 	return fmt.Errorf("%s failed: %w. If the facts store is unreachable, call "+
 		"velruna_status and tell the user; do not retry in a loop", op, err)
 }

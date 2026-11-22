@@ -322,13 +322,14 @@ func loadConfig(explicitPath string, finder func() string) (*Config, error) {
 		// variable ("environment always overrides the file").
 		cfg.OpenSearchURLs = nil
 	}
-	if urls := os.Getenv("OPENSEARCH_URLS"); urls != "" {
+	if urls, ok := os.LookupEnv("OPENSEARCH_URLS"); ok {
 		list := splitURLList(urls)
 		if len(list) == 0 {
 			// An empty list would silently fall back to the file's opensearch_url
 			// (or the default localhost): refuse instead of writing to a store the
-			// caller did not name (same rule as the fetch allowlist).
-			return nil, fmt.Errorf("OPENSEARCH_URLS has no entries: list node addresses or unset it")
+			// caller did not name (same rule as the fetch allowlist). LookupEnv
+			// catches the exported-but-empty variable a manifest expansion leaves.
+			return nil, fmt.Errorf("OPENSEARCH_URLS is set but has no entries: list node addresses or unset it")
 		}
 		cfg.OpenSearchURLs = list
 	}

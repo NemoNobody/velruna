@@ -333,14 +333,19 @@ func TestLoadConfig_EnvURLsWinOverEnvURL(t *testing.T) {
 }
 
 // A set-but-empty OPENSEARCH_URLS must be refused, not silently fall back to
-// the default localhost (the same rule as the fetch allowlist).
+// the default localhost (the same rule as the fetch allowlist). The exported-
+// but-empty case is what a manifest's ${MISSING} expansion produces.
 func TestLoadConfig_EmptyEnvURLsIsAnError(t *testing.T) {
-	dir := t.TempDir()
-	restore := chdir(t, dir)
-	defer restore()
-	t.Setenv("OPENSEARCH_URLS", " , ")
-	if _, err := LoadConfig(); err == nil || !strings.Contains(err.Error(), "OPENSEARCH_URLS") {
-		t.Fatalf("LoadConfig = %v, want a refusal naming OPENSEARCH_URLS", err)
+	for _, v := range []string{" , ", ""} {
+		t.Run("value "+v, func(t *testing.T) {
+			dir := t.TempDir()
+			restore := chdir(t, dir)
+			defer restore()
+			t.Setenv("OPENSEARCH_URLS", v)
+			if _, err := LoadConfig(); err == nil || !strings.Contains(err.Error(), "OPENSEARCH_URLS") {
+				t.Fatalf("LoadConfig = %v, want a refusal naming OPENSEARCH_URLS", err)
+			}
+		})
 	}
 }
 
