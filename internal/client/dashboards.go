@@ -65,23 +65,23 @@ func (c *Client) kibanaWriteIndex(ctx context.Context) (string, error) {
 	status, body, err := c.doSavedObjectRequest(ctx, http.MethodGet, path, nil)
 	if err != nil {
 		return "", fmt.Errorf("probe the %s alias at %s: %w%s",
-			kibanaAlias, c.cfg.OpenSearchURL, err, transportHint(err))
+			kibanaAlias, c.endpointLabel(), err, transportHint(err))
 	}
 	switch status {
 	case http.StatusOK:
 	case http.StatusUnauthorized, http.StatusForbidden:
 		return "", fmt.Errorf("probe the %s alias at %s: HTTP %d — the credentials were rejected "+
-			"(check the password and the cat/aliases privilege)", kibanaAlias, c.cfg.OpenSearchURL, status)
+			"(check the password and the cat/aliases privilege)", kibanaAlias, c.endpointLabel(), status)
 	case http.StatusNotFound, http.StatusBadRequest:
 		// Defensive: a live OpenSearch answers a named _cat alias that does not
 		// exist with 200 + [] (see below), but a proxy or an older gateway may
 		// turn that into 404 — either way it means "Dashboards never
 		// initialized here".
 		return "", fmt.Errorf("no %s alias at %s (HTTP %d): start OpenSearch Dashboards once against "+
-			"this cluster, or pass --index", kibanaAlias, c.cfg.OpenSearchURL, status)
+			"this cluster, or pass --index", kibanaAlias, c.endpointLabel(), status)
 	default:
 		return "", fmt.Errorf("probe the %s alias at %s: HTTP %d: %s",
-			kibanaAlias, c.cfg.OpenSearchURL, status, bodySnippet(body))
+			kibanaAlias, c.endpointLabel(), status, bodySnippet(body))
 	}
 
 	var rows []struct {
@@ -91,7 +91,7 @@ func (c *Client) kibanaWriteIndex(ctx context.Context) (string, error) {
 	}
 	if err := json.Unmarshal([]byte(body), &rows); err != nil {
 		return "", fmt.Errorf("decode the %s alias list from %s: %w",
-			kibanaAlias, c.cfg.OpenSearchURL, err)
+			kibanaAlias, c.endpointLabel(), err)
 	}
 
 	var write []string
@@ -131,7 +131,7 @@ func (c *Client) kibanaWriteIndex(ctx context.Context) (string, error) {
 			"index: pass --index to choose one", kibanaAlias, len(rows), strings.Join(idx, ", "))
 	}
 	return "", fmt.Errorf("the %s alias resolves to no index at %s: start OpenSearch Dashboards "+
-		"once against this cluster, or pass --index", kibanaAlias, c.cfg.OpenSearchURL)
+		"once against this cluster, or pass --index", kibanaAlias, c.endpointLabel())
 }
 
 // transportHint adds the one sentence that a transport-level failure needs; a
@@ -242,12 +242,12 @@ func (c *Client) probeSavedObjectsIndex(ctx context.Context, index string) (unve
 			// Truncated JSON would read as "not a saved-objects index"; say what
 			// actually happened instead.
 			return false, fmt.Errorf("the mapping of %s at %s is larger than %d MiB: cannot verify it — "+
-				"omit --index to resolve the .kibana alias instead", index, c.cfg.OpenSearchURL, maxSavedObjectsBody>>20)
+				"omit --index to resolve the .kibana alias instead", index, c.endpointLabel(), maxSavedObjectsBody>>20)
 		}
 		if !hasSavedObjectsMapping([]byte(body)) {
 			return false, fmt.Errorf("index %s at %s has no saved-objects mapping (type/updated_at/"+
 				"migrationVersion): it is not a Dashboards saved-objects index — check --index",
-				index, c.cfg.OpenSearchURL)
+				index, c.endpointLabel())
 		}
 		return false, nil
 	case http.StatusNotFound:
@@ -255,7 +255,7 @@ func (c *Client) probeSavedObjectsIndex(ctx context.Context, index string) (unve
 		// (action.auto_create_index is on by default) and every PUT returns
 		// 2xx: the run looks successful and installs nothing anyone can see.
 		return false, fmt.Errorf("index %s does not exist at %s: has Dashboards ever started against "+
-			"this cluster, or is --index mistyped?", index, c.cfg.OpenSearchURL)
+			"this cluster, or is --index mistyped?", index, c.endpointLabel())
 	case http.StatusUnauthorized:
 		return false, fmt.Errorf("probe index %s: HTTP 401 — the credentials were rejected "+
 			"(check the password)", index)
@@ -276,7 +276,7 @@ func (c *Client) probeSavedObjectsIndex(ctx context.Context, index string) (unve
 			return true, nil
 		case http.StatusNotFound:
 			return false, fmt.Errorf("index %s does not exist at %s: has Dashboards ever started against "+
-				"this cluster, or is --index mistyped?", index, c.cfg.OpenSearchURL)
+				"this cluster, or is --index mistyped?", index, c.endpointLabel())
 		}
 		return false, fmt.Errorf("probe index %s: HTTP %d: %s", index, hstatus, bodySnippet(hbody))
 	}

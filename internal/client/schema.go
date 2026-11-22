@@ -52,11 +52,15 @@ func (c *Client) ensureSchemaVersion(ctx context.Context) (checked bool, err err
 	}
 	switch status {
 	case http.StatusOK:
-	case http.StatusForbidden, http.StatusUnauthorized:
+	case http.StatusForbidden:
 		// A role that may write but not read mappings: the version cannot be
 		// checked, and refusing would break a setup that worked before. Cache
 		// the answer so every tool call does not pay a refused GET.
 		gate.done, gate.unreadable = true, true
+		return false, nil
+	case http.StatusUnauthorized:
+		// A credential problem is usually transient (a rotated secret, the
+		// security plugin restarting): do not cache it, retry next call.
 		return false, nil
 	default:
 		return false, nil
@@ -73,16 +77,22 @@ func (c *Client) ensureSchemaVersion(ctx context.Context) (checked bool, err err
 
 	found := 0
 	for _, idx := range res {
-		if raw, ok := idx.Mappings.Meta[schemaMetaKey]; ok {
-			var v int
-			if uerr := json.Unmarshal(raw, &v); uerr == nil {
-				found = v
-			}
+		raw, ok := idx.Mappings.Meta[schemaMetaKey]
+		if !ok {
+			continue
 		}
+		var v int
+		if uerr := json.Unmarshal(raw, &v); uerr != nil {
+			// The marker exists but is not an integer (hand-edited, or written
+			// by a future scheme): that is not "unversioned", it is unknown —
+			// stamping 1 now would overwrite the newer marker with a lie.
+			return false, nil
+		}
+		found = v
 	}
 	if found > SchemaVersion {
 		return false, fmt.Errorf("the store at %s was written by a newer velruna (schema %d, this binary "+
-			"understands %d): upgrade the binary before using this store", c.cfg.OpenSearchURL, found, SchemaVersion)
+			"understands %d): upgrade the binary before using this store", c.endpointLabel(), found, SchemaVersion)
 	}
 	gate.done = true
 	return true, nil

@@ -251,17 +251,23 @@ func wrapWriteError(op string, err error) error {
 	return fmt.Errorf("%s: %w", op, err)
 }
 
+// endpointLabel names the store in diagnostics: every configured node, not
+// the single url a list-only config leaves at its default.
+func (c *Client) endpointLabel() string {
+	urls := c.cfg.EffectiveURLs()
+	redacted := make([]string, 0, len(urls))
+	for _, u := range urls {
+		redacted = append(redacted, config.RedactURL(u))
+	}
+	return strings.Join(redacted, ", ")
+}
+
 // Info checks connectivity and returns cluster information. It is the cheapest
 // way to tell whether the store is usable.
 func (c *Client) Info(ctx context.Context) (*opensearchapi.InfoResp, error) {
 	resp, err := c.api.Info(ctx, nil)
 	if err != nil {
-		urls := c.cfg.EffectiveURLs()
-		redacted := make([]string, 0, len(urls))
-		for _, u := range urls {
-			redacted = append(redacted, config.RedactURL(u))
-		}
-		return nil, fmt.Errorf("reach OpenSearch at %s: %w", strings.Join(redacted, ", "), err)
+		return nil, fmt.Errorf("reach OpenSearch at %s: %w", c.endpointLabel(), err)
 	}
 	return resp, nil
 }

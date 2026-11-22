@@ -76,6 +76,89 @@ func TestEnsureIndexDoesNotStampWhenSchemaUnreadable(t *testing.T) {
 	}
 }
 
+// A role that may write but not read mappings cannot produce a verdict: the
+// mapping write (and its _meta stamp) must be skipped, and reads must work.
+func TestEnsureIndexSkipsStampWhenMappingsUnreadable(t *testing.T) {
+	var puts []string
+	c, _ := newFakeClient(t, func(r recordedRequest) (int, string) {
+		switch {
+		case r.Method == http.MethodHead && r.Path == "/velruna":
+			return http.StatusOK, ""
+		case r.Method == http.MethodGet && r.Path == "/velruna/_mapping":
+			return http.StatusForbidden, `{"status":403,"error":"no permission"}`
+		case r.Method == http.MethodPut && r.Path == "/velruna/_mapping":
+			puts = append(puts, r.Body)
+			return http.StatusOK, `{"acknowledged":true}`
+		case r.Method == http.MethodGet && strings.HasPrefix(r.Path, "/_cat/indices"):
+			return http.StatusOK, `[]`
+		case r.Method == http.MethodGet && r.Path == "/_nodes/stats/fs":
+			return http.StatusOK, `{"nodes":{}}`
+		}
+		return http.StatusOK, `{}`
+	})
+
+	if err := c.EnsureIndex(context.Background()); err != nil {
+		t.Fatalf("EnsureIndex: %v", err)
+	}
+	if len(puts) != 0 {
+		t.Errorf("stamped the schema without a verdict: %v", puts)
+	}
+}
+
+// A 401 is a credential problem (rotated secret, security plugin restarting),
+// not a role verdict: the check must retry instead of caching "unreadable"
+// for the life of the process.
+func TestEnsureIndexRetriesSchemaAfter401(t *testing.T) {
+	calls := 0
+	c, _ := newFakeClient(t, func(r recordedRequest) (int, string) {
+		switch {
+		case r.Method == http.MethodHead && r.Path == "/velruna":
+			return http.StatusOK, ""
+		case r.Method == http.MethodGet && r.Path == "/velruna/_mapping":
+			calls++
+			if calls == 1 {
+				return http.StatusUnauthorized, `{"status":401,"error":"unauthorized"}`
+			}
+			return http.StatusOK, `{"velruna":{"mappings":{"_meta":{"velruna_schema":99},"properties":{}}}}`
+		}
+		return http.StatusOK, `{}`
+	})
+
+	if err := c.EnsureIndex(context.Background()); err != nil {
+		t.Fatalf("first EnsureIndex (401 must not be fatal): %v", err)
+	}
+	if err := c.EnsureIndex(context.Background()); err == nil || !strings.Contains(err.Error(), "newer velruna") {
+		t.Fatalf("second EnsureIndex = %v, want the newer-schema refusal after the retry", err)
+	}
+}
+
+// The lost-create-race path must adopt the index: a newer schema (created by
+// another binary) must be refused before any mapping write.
+func TestEnsureIndexCreateRaceChecksSchema(t *testing.T) {
+	var puts []string
+	c, _ := newFakeClient(t, func(r recordedRequest) (int, string) {
+		switch {
+		case r.Method == http.MethodHead && r.Path == "/velruna":
+			return http.StatusNotFound, `{"status":404,"error":"index_not_found_exception"}`
+		case r.Method == http.MethodPut && r.Path == "/velruna":
+			return http.StatusBadRequest, `{"error":{"type":"resource_already_exists_exception","reason":"index [velruna/uuid] already exists"},"status":400}`
+		case r.Method == http.MethodGet && r.Path == "/velruna/_mapping":
+			return http.StatusOK, `{"velruna":{"mappings":{"_meta":{"velruna_schema":99},"properties":{}}}}`
+		case r.Method == http.MethodPut && r.Path == "/velruna/_mapping":
+			puts = append(puts, r.Body)
+			return http.StatusOK, `{"acknowledged":true}`
+		}
+		return http.StatusOK, `{}`
+	})
+
+	if err := c.EnsureIndex(context.Background()); err == nil {
+		t.Fatal("the create-race path accepted a newer store")
+	}
+	if len(puts) != 0 {
+		t.Errorf("wrote a mapping into a store it cannot understand: %v", puts)
+	}
+}
+
 // An older store (no marker: every 0.8.x store) is adopted, and the mapping
 // write carries the current schema marker.
 func TestEnsureIndexAdoptsUnversionedStore(t *testing.T) {
