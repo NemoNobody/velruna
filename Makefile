@@ -1,10 +1,10 @@
 # Development entry points. The defaults match .github/workflows/ci.yml so a
 # local `make ci` reproduces what the CI gate enforces.
 
-# Working tree version carries the next-release number with a -dev suffix; the
-# real (suffix-less) number is set only when cutting a tag:
-# make release VERSION=v0.8.10. Tag builds stamp the tag name via release.yml.
-VERSION ?= 0.8.10
+# Working tree version: the next release. The release workflow stamps the tag
+# name itself, so a tag build is unaffected by this default:
+# make release VERSION=v0.9.0.
+VERSION ?= 0.9.0
 # Commit stamps the exact tree into the binary (velruna_status reports it).
 # `?=` + shell fallback: local builds get the live HEAD; CI can pass it explicitly.
 COMMIT ?= $(shell git rev-parse --short HEAD 2>/dev/null)

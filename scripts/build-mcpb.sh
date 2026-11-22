@@ -46,10 +46,16 @@ if [ "$platform" != "windows" ]; then
 	install -m 0755 "$here/packaging/mcpb/velruna-launch.sh" "$stage/server/velruna-launch.sh"
 fi
 
-count=0
-for bin in "$dist"/velruna-*; do
-	[ -f "$bin" ] || continue
-	if [ -n "$platform" ] && [ "$platform" != "windows" ]; then
+	count=0
+	for bin in "$dist"/velruna-*; do
+		[ -f "$bin" ] || continue
+		# Only release binaries: a re-run in a dirty dist also holds bundles and
+		# checksums.txt, and `velruna-*` matches those too.
+		case "$(basename "$bin")" in
+			velruna-darwin-*|velruna-linux-*|velruna-windows-*) ;;
+			*) continue ;;
+		esac
+		if [ -n "$platform" ] && [ "$platform" != "windows" ]; then
 		case "$(basename "$bin")" in
 			velruna-"$platform"-*) ;;
 			*) continue ;;

@@ -65,7 +65,11 @@ def main() -> int:
         "capabilities": {},
         "clientInfo": {"name": "py-smoke", "version": "0"},
     }})
-    print("initialize  :", brief(await_msg(10), 160))
+    failures = []
+    init = await_msg(10)
+    print("initialize  :", brief(init, 160))
+    if not (init and "result" in init):
+        failures.append("initialize")
 
     send({"jsonrpc": "2.0", "method": "notifications/initialized"})
     send({"jsonrpc": "2.0", "id": 2, "method": "tools/list"})
@@ -73,13 +77,19 @@ def main() -> int:
     if tools and "result" in tools:
         names = [t.get("name") for t in tools["result"].get("tools", [])]
         print("tools/list  :", len(names), "tools:", ", ".join(names))
+        if "velruna_get" not in names:
+            failures.append("tools/list missing velruna_get")
     else:
         print("tools/list  :", brief(tools))
+        failures.append("tools/list")
 
     send({"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": {
         "name": "velruna_get", "arguments": {"key": KEY},
     }})
-    print("tools/call  :", brief(await_msg(20), 800))
+    call = await_msg(20)
+    print("tools/call  :", brief(call, 800))
+    if not (call and "result" in call):
+        failures.append("tools/call")
 
     proc.stdin.close()
     try:
@@ -90,6 +100,11 @@ def main() -> int:
     err = proc.stderr.read().decode(errors="replace").strip()
     if err:
         print("stderr      :", err[:500])
+    if failures:
+        # A smoke that cannot fail is decoration: a silent server would have
+        # printed NO RESPONSE and exited 0. The workflow step must go red.
+        print("FAILED:", "; ".join(failures), file=sys.stderr)
+        return 1
     return 0
 
 

@@ -62,8 +62,9 @@ Each fact carries evidence, not verdicts:
   exact-match filterable — cross-project slices (`perf`, `security`, `infra`)
   without a graph backlog, and recipes/rules stay findable by topic;
 - **successor** (`superseded_by`): at most one link per fact to the record
-  that replaces it, set by `velruna_patch` (a later patch may repoint it;
-  both events are journaled as `op=supersede`).
+  that replaces it, set by `velruna_patch` (a later patch may repoint it).
+  A link-only patch journals `op=supersede`; a patch that also changes the
+  value or retires the fact keeps that event's op and its entry states the link.
   The target must be a verified fact and the chain must stay cycle-free; a
   link pointing back in time is legal but flagged in the journal. It answers
   "this key is stale garbage, read that one instead" without copying the value;
