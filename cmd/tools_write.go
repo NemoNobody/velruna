@@ -274,7 +274,7 @@ type patchInput struct {
 	Notes        string   `json:"notes,omitempty" jsonschema:"replaces notes (non-empty = provided, add's convention)"`
 	NotesAppend  string   `json:"notes_append,omitempty" jsonschema:"append a dated line 'YYYY-MM-DD: text' to notes (atomic server-side; the cheap qualifier update — no need to resend the value)"`
 	Source       string   `json:"source,omitempty" jsonschema:"replaces source when non-empty"`
-	Status       string   `json:"status,omitempty" jsonschema:"verified | obsolete: a transition is journaled; obsolete→verified sets observed_at=now (re-declaring alive is a fresh verification)"`
+	Status       string   `json:"status,omitempty" jsonschema:"verified | obsolete: a transition is journaled; a flip to obsolete is refused while other facts point at the target with superseded_by; obsolete→verified sets observed_at=now (re-declaring alive is a fresh verification)"`
 	Reason       string   `json:"reason,omitempty" jsonschema:"why it became obsolete (only with status=obsolete; folded into notes)"`
 	Reverify     bool     `json:"reverify,omitempty" jsonschema:"re-confirm the current value: observed_at moves to now, the journal gains op=rediscovery, the writer joins confirmed_by; cannot be combined with value/summary/status"`
 	TTLDays      int      `json:"ttl_days,omitempty" jsonschema:"retune the staleness window in days (bounded by the category cap: config/endpoint 14, location/behavior 30, recipe 180, rule 90; context_map uncapped); omitted = untouched; a qualifier touch, not journaled"`

@@ -209,7 +209,9 @@ func runMCPServer(confPath string) error {
 		Description: "Mark a fact obsolete because its subject is gone (file " +
 			"deleted, endpoint removed). Use velruna_add when the value " +
 			"changed, velruna_patch to flip status — the transition is journaled " +
-			"either way. The value is kept for reference; the reason is appended " +
+			"either way. Refused while other facts point at the target with " +
+			"superseded_by (the refusal names the referrers: repoint or retire " +
+			"them first). The value is kept for reference; the reason is appended " +
 			"to notes.",
 	}, s.obsolete)
 

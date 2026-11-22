@@ -6,10 +6,33 @@ under `## Unreleased`; the release commit moves that section under its version
 number (`.github/workflows/release.yml` reads the heading to build the release
 notes).
 
-## v0.9.0 — 2026-11-22
+## Unreleased
 
 ### Added
 
+- `velruna links check`: one bounded read (`--limit`, default 1000 edges) walks
+  every fact that carries a `superseded_by` link and reports the three ways an
+  edge goes wrong — `dangling` (the target is gone), `unverified` (the target
+  is not verified), `cycle` (the edge loops). Exit 1 when findings exist.
+  Repair by repointing the source (`velruna_patch superseded_by`) or retiring
+  it too.
+- retire guard: `velruna_obsolete` and a `velruna_patch` status flip to
+  `obsolete` are refused while other facts point at the target with
+  `superseded_by` — the refusal names the referrers (ten plus a count) and
+  points at `velruna links check` to map the graph. A failed probe fails the
+  retirement, never a false "no links"; the guard is advisory like every
+  check-then-write, so readers must still tolerate a dangling target.
+- `velruna dashboards gen-fields`: regenerates the bundled index-pattern field
+  lists natively from the binary (token-preserving rewrite of the bundle);
+  the python generator is gone.
+- `status` reports the store schema and field-type drift (`schema:` /
+  `mapping:` lines, `schema_hint` in `velruna_status`): a mapping mismatch
+  between binary and store is named instead of surfacing as odd search
+  results; docs/how-it-works.md carries the re-index recipe.
+- creds: keyring entries are named after the store, not the URL
+  (`cluster/<cluster_uuid>`, config key `opensearch_cluster`): moving the
+  store to another host or port keeps the same credentials. The uuid is
+  discovered at `creds set`; legacy host-named entries stay readable.
 - MCP bundle (`.mcpb`): every release now attaches a universal
   `velruna-<version>.mcpb` plus per-OS `-darwin`, `-linux` and `-windows`
   bundles. A desktop client installs one with a configuration dialog —
@@ -37,6 +60,11 @@ notes).
   `workflow_dispatch` smoke pipeline that boots the single-node stack, runs
   `cli-smoke`, pushes the dashboard bundle and checks every panel through the
   cluster.
+
+### Changed
+
+- `creds get` is gone: the password is never printed. MCP learns it through
+  the keyring; scripts read `OPENSEARCH_PASSWORD`.
 
 ## v0.8.10 — 2026-11-21
 
