@@ -21,7 +21,8 @@ func TestDashboardsGenFieldsBakesAndPreserves(t *testing.T) {
 			_, _ = w.Write([]byte(`{"velruna":{"mappings":{"properties":{
 				"key": {"type": "keyword"},
 				"value": {"type": "text", "fields": {"keyword": {"type": "keyword"}}},
-				"created_at": {"type": "date"}
+				"created_at": {"type": "date"},
+				"vector": {"type": "knn_vector"}
 			}}}}`))
 		case "/velruna-docs/_mapping":
 			_, _ = w.Write([]byte(`{"velruna-docs":{"mappings":{"properties":{
@@ -78,6 +79,11 @@ func TestDashboardsGenFieldsBakesAndPreserves(t *testing.T) {
 	}
 	if !strings.Contains(errOut.String(), "velruna-history-*: mapping unavailable") {
 		t.Errorf("an unreadable pattern must be reported on stderr:\n%s", errOut.String())
+	}
+	// Unknown mapping types are reported at the generator too, not just by
+	// the unit tests: a shorter baked list must not pass for a complete one.
+	if !strings.Contains(errOut.String(), "velruna: skipped mapping type(s) not in the OSD table: knn_vector") {
+		t.Errorf("a skipped mapping type must be reported on stderr:\n%s", errOut.String())
 	}
 
 	data, err := os.ReadFile(outPath)

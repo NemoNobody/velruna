@@ -108,6 +108,14 @@ func flattenFields(props map[string]MappingField, prefix string, skipped map[str
 	for _, name := range names {
 		spec := props[name]
 		path := prefix + name
+		if spec.Enabled != nil && !*spec.Enabled {
+			// A deliberately disabled object: the store chose not to index
+			// anything under it — absence is the design, not a generator
+			// gap. Checked before the container walk: a disabled object can
+			// still carry properties, and baking them would list fields the
+			// store refuses to index.
+			continue
+		}
 		_, isLeaf := fieldTypes[spec.Type]
 		if len(spec.Properties) > 0 && !isLeaf {
 			// A container (typeless object, "object", "nested") is walked
@@ -126,14 +134,11 @@ func flattenFields(props map[string]MappingField, prefix string, skipped map[str
 				Aggregatable:      ft.aggs,
 				ReadFromDocValues: ft.docs,
 			})
-		} else if spec.Type != "" && len(spec.Properties) == 0 {
-			if spec.Enabled != nil && !*spec.Enabled {
-				// A deliberately disabled object: the store chose not to index
-				// it — absence is the design, not a generator gap.
-				continue
-			}
+		} else if spec.Type != "" && len(spec.Properties) == 0 && spec.Type != "object" && spec.Type != "nested" {
 			// A leaf type the OSD table does not know (float, ip,
-			// date_nanos, ...): reported, never silently dropped.
+			// date_nanos, ...): a field was lost, so it is reported, never
+			// silently dropped. An EMPTY object/nested container is not a
+			// lost field — there was nothing to bake — so it stays quiet.
 			skipped[spec.Type] = true
 		}
 		// Multi-fields (e.g. a text field with a .keyword subfield) are

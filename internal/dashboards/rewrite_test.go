@@ -18,7 +18,10 @@ func TestFieldsFromMappingBakesTheBundleShape(t *testing.T) {
 		"observed_at": {"type": "date"},
 		"ttl_days": {"type": "integer"},
 		"confirmed_by": {"type": "object", "enabled": false},
-		"vector": {"type": "knn_vector"}
+		"dead": {"type": "object", "enabled": false, "properties": {"a": {"type": "keyword"}}},
+		"dyn": {"type": "object"},
+		"vector": {"type": "knn_vector"},
+		"floaty": {"type": "float"}
 	}`), &props); err != nil {
 		t.Fatal(err)
 	}
@@ -32,10 +35,13 @@ func TestFieldsFromMappingBakesTheBundleShape(t *testing.T) {
 	if got := strings.Join(names, ","); got != want {
 		t.Errorf("field names = %s, want %s", got, want)
 	}
-	// Types without an OSD equivalent are reported, never dropped in silence;
-	// a deliberately disabled object is not one of them.
-	if strings.Join(skipped, ",") != "knn_vector" {
-		t.Errorf("skipped = %v, want only knn_vector reported", skipped)
+	// Types without an OSD equivalent are reported, never dropped in
+	// silence. Not reported: a deliberately disabled object (even one that
+	// still carries properties — baking those would list fields the store
+	// refuses to index) and an EMPTY object container, where nothing was
+	// lost because there was nothing to bake.
+	if strings.Join(skipped, ",") != "float,knn_vector" {
+		t.Errorf("skipped = %v, want float and knn_vector reported", skipped)
 	}
 
 	rendered, err := RenderFields(fields)
@@ -90,6 +96,23 @@ func TestRenderFieldsEscapesHostileNames(t *testing.T) {
 	}
 	if len(back) != 1 || back[0].Name != `we"ird\name` {
 		t.Errorf("escape round trip wrong: %+v (%s)", back, rendered)
+	}
+}
+
+func TestRewriteFieldsPreservesBlankLines(t *testing.T) {
+	// The O(1) sawContent fix must not change behavior: leading blank lines
+	// are dropped, interior and trailing ones are kept — the committed
+	// bundle's byte shape, so a re-bake diffs only the lists that changed.
+	bundle := []byte("\n\n{\"id\": \"p1\", \"type\": \"index-pattern\", \"attributes\": {\"title\": \"velruna\", \"timeFieldName\": \"created_at\", \"fields\": \"[{\\\"name\\\": \\\"old\\\"}]\"}}\n\n{\"id\": \"v1\", \"type\": \"visualization\", \"attributes\": {\"title\": \"Facts\"}}\n\n")
+	newFields := `[{"name": "value", "type": "string", "esTypes": ["text"], "count": 0, "scripted": false, "searchable": true, "aggregatable": false, "readFromDocValues": false}]`
+
+	out, err := RewriteFields(bundle, map[string]string{"velruna": newFields})
+	if err != nil {
+		t.Fatalf("RewriteFields: %v", err)
+	}
+	want := "{\"id\": \"p1\", \"type\": \"index-pattern\", \"attributes\": {\"title\": \"velruna\", \"timeFieldName\": \"created_at\", \"fields\": \"" + strings.ReplaceAll(newFields, `"`, `\"`) + "\"}}\n\n{\"id\": \"v1\", \"type\": \"visualization\", \"attributes\": {\"title\": \"Facts\"}}\n\n"
+	if string(out) != want {
+		t.Errorf("output =\n%q\nwant\n%q", string(out), want)
 	}
 }
 
