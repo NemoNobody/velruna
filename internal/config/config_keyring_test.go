@@ -195,6 +195,16 @@ func TestClusterNameFromEnvAndFile(t *testing.T) {
 	if cfg.OpenSearchCluster != "from-env" {
 		t.Errorf("env must override the file: %q", cfg.OpenSearchCluster)
 	}
+	// A blank env value reads as unset: it must not clear the name a
+	// previous 'creds set' recorded in the file (same rule as the user).
+	t.Setenv("OPENSEARCH_CLUSTER", "   ")
+	cfg, err = LoadConfig()
+	if err != nil {
+		t.Fatalf("LoadConfig with blank env: %v", err)
+	}
+	if cfg.OpenSearchCluster != "from-file" {
+		t.Errorf("a blank env must not clear the file's cluster name: %q", cfg.OpenSearchCluster)
+	}
 }
 
 // TestUserIsTrimmedLikeTheCluster: the user identity is consumed by the

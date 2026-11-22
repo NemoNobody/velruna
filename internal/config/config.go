@@ -347,8 +347,11 @@ func loadConfig(explicitPath string, finder func() string) (*Config, error) {
 		}
 		cfg.OpenSearchURLs = list
 	}
-	if v := os.Getenv("OPENSEARCH_CLUSTER"); v != "" {
-		cfg.OpenSearchCluster = strings.TrimSpace(v)
+	if v := strings.TrimSpace(os.Getenv("OPENSEARCH_CLUSTER")); v != "" {
+		// Same blank rule as OPENSEARCH_USER below: a whitespace-only value
+		// reads as unset and keeps what the file recorded, so it can never
+		// silently clear a name a previous 'creds set' wrote.
+		cfg.OpenSearchCluster = v
 	}
 	if u := strings.TrimSpace(os.Getenv("OPENSEARCH_USER")); u != "" {
 		// Trimmed like opensearch_cluster: the identity travels between the
