@@ -17,6 +17,9 @@ import (
 type supersedeStore struct {
 	docs   map[string]string
 	writes []string
+	// failIDs makes linkMGet answer those ids with a per-document error
+	// (shard unavailable), which the check must treat as a store failure.
+	failIDs map[string]string
 }
 
 // respond serves the routes Patch touches: document GETs from docs, the
@@ -48,101 +51,151 @@ func (s *supersedeStore) respond(r recordedRequest) (int, string) {
 	return http.StatusInternalServerError, `{"status":500,"error":"unexpected ` + r.Method + " " + r.Path + `"}`
 }
 
-// linkSearch answers a superseded_by term probe (incoming links) or an
-// exists-field scan (links check) from the stored documents.
+// linkSearch answers the superseded_by searches: the retire guard's probe
+// (bool filter on superseded_by + status, must_not the retiring key) and
+// links check's exists scan. Clauses are evaluated against the stored
+// documents; query shapes the client must not send fail as 400s, which
+// keeps the outgoing queries themselves pinned.
 func (s *supersedeStore) linkSearch(body string) (int, string) {
 	var req struct {
 		Query struct {
 			Term   map[string]json.RawMessage `json:"term"`
 			Exists map[string]string          `json:"exists"`
 			Bool   struct {
-				Filter []struct {
-					Exists map[string]string `json:"exists"`
-				} `json:"filter"`
-				MustNot []struct {
-					Term map[string]string `json:"term"`
-				} `json:"must_not"`
+				Filter  []linkClause `json:"filter"`
+				MustNot []linkClause `json:"must_not"`
 			} `json:"bool"`
 		} `json:"query"`
-		Size int `json:"size"`
+		Size           int             `json:"size"`
+		Sort           json.RawMessage `json:"sort"`
+		TrackTotalHits bool            `json:"track_total_hits"`
 	}
 	if err := json.Unmarshal([]byte(body), &req); err != nil {
 		return http.StatusBadRequest, `{"error":"bad probe body"}`
 	}
-	scan := req.Query.Exists["field"] == "superseded_by"
-	for _, f := range req.Query.Bool.Filter {
+	// The store's index.max_result_window: from+size beyond it is a raw 400.
+	if req.Size > 10000 {
+		return http.StatusBadRequest, `{"error":{"type":"search_phase_execution_exception","reason":"Result window is too large"}}`
+	}
+	var filters, mustNot []linkClause
+	if len(req.Query.Term) > 0 || len(req.Query.Exists) > 0 {
+		filters = append(filters, linkClause{Term: req.Query.Term, Exists: req.Query.Exists})
+	}
+	filters = append(filters, req.Query.Bool.Filter...)
+	mustNot = append(mustNot, req.Query.Bool.MustNot...)
+
+	scan := false
+	for _, f := range filters {
 		if f.Exists["field"] == "superseded_by" {
 			scan = true
 		}
 	}
 	if scan {
-		// The scan must exclude empty links: without the must_not they consume
-		// scan slots and blur the truncation signal.
+		// The scan contract: exclude empty links (they eat scan slots and
+		// blur truncation), ask for exact totals, and pin a sort so the
+		// truncated window is reproducible.
 		filtered := false
-		for _, m := range req.Query.Bool.MustNot {
-			if v, ok := m.Term["superseded_by"]; ok && v == "" {
+		for _, m := range mustNot {
+			if v, ok := m.Term["superseded_by"]; ok && string(v) == `""` {
 				filtered = true
 			}
 		}
 		if !filtered {
 			return http.StatusBadRequest, `{"error":"scan must exclude empty superseded_by links"}`
 		}
-		return s.linkScan(req.Size)
-	}
-	target := ""
-	for _, raw := range req.Query.Term {
-		// The probe sends the shorthand {"field": value}; accept the long
-		// {"field": {"value": ...}} form as well.
-		var val string
-		if err := json.Unmarshal(raw, &val); err == nil {
-			target = val
-			break
+		if !req.TrackTotalHits {
+			return http.StatusBadRequest, `{"error":"scan must pin the total"}`
 		}
-		var cond struct {
-			Value string `json:"value"`
-		}
-		if err := json.Unmarshal(raw, &cond); err == nil {
-			target = cond.Value
-			break
+		if len(req.Sort) == 0 {
+			return http.StatusBadRequest, `{"error":"scan must sort deterministically"}`
 		}
 	}
+
 	var hits []string
 	total := 0
 	for key, src := range s.docs {
-		var doc struct {
-			SupersededBy string `json:"superseded_by"`
+		var view struct {
+			Key          string          `json:"key"`
+			Status       string          `json:"status"`
+			SupersededBy json.RawMessage `json:"superseded_by"`
 		}
-		if err := json.Unmarshal([]byte(src), &doc); err != nil || doc.SupersededBy != target {
+		if err := json.Unmarshal([]byte(src), &view); err != nil {
+			continue
+		}
+		match := true
+		for _, f := range filters {
+			if !matchClause(f, key, view.Status, view.SupersededBy) {
+				match = false
+				break
+			}
+		}
+		if match {
+			for _, m := range mustNot {
+				if matchClause(m, key, view.Status, view.SupersededBy) {
+					match = false
+					break
+				}
+			}
+		}
+		if !match {
 			continue
 		}
 		total++
 		if req.Size > 0 && len(hits) >= req.Size {
 			continue
 		}
-		hits = append(hits, `{"_source":{"key":"`+key+`"}}`)
+		q, _ := json.Marshal(key)
+		source := `{"key":` + string(q)
+		if len(view.SupersededBy) > 0 {
+			source += `,"superseded_by":` + string(view.SupersededBy)
+		}
+		source += `}`
+		hits = append(hits, `{"_source":`+source+`}`)
 	}
 	return http.StatusOK, `{"hits":{"total":{"value":` + fmt.Sprint(total) + `},"hits":[` + strings.Join(hits, ",") + `]}}`
 }
 
-// linkScan answers links check's exists scan: every document that carries a
-// superseded_by link, its key and target in _source.
-func (s *supersedeStore) linkScan(size int) (int, string) {
-	var hits []string
-	total := 0
-	for key, src := range s.docs {
-		var doc struct {
-			SupersededBy string `json:"superseded_by"`
+// linkClause is one leaf query the fake understands: a term on the indexed
+// keyword fields or an exists on superseded_by.
+type linkClause struct {
+	Term   map[string]json.RawMessage `json:"term"`
+	Exists map[string]string          `json:"exists"`
+}
+
+func matchClause(cl linkClause, key, status string, superseded json.RawMessage) bool {
+	for field, rawVal := range cl.Term {
+		var want string
+		if err := json.Unmarshal(rawVal, &want); err != nil {
+			return false
 		}
-		if err := json.Unmarshal([]byte(src), &doc); err != nil || doc.SupersededBy == "" {
-			continue
+		var got string
+		switch field {
+		case "key":
+			got = key
+		case "status":
+			got = status
+		case "superseded_by":
+			if err := json.Unmarshal(superseded, &got); err != nil {
+				return false // multi-valued or absent: a term probe never matches
+			}
+		default:
+			return false
 		}
-		total++
-		if size > 0 && len(hits) >= size {
-			continue
+		if got != want {
+			return false
 		}
-		hits = append(hits, `{"_source":{"key":"`+key+`","superseded_by":"`+doc.SupersededBy+`"}}`)
 	}
-	return http.StatusOK, `{"hits":{"total":{"value":` + fmt.Sprint(total) + `},"hits":[` + strings.Join(hits, ",") + `]}}`
+	for _, field := range cl.Exists {
+		switch field {
+		case "superseded_by":
+			if len(superseded) == 0 || string(superseded) == "null" {
+				return false
+			}
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 // linkMGet answers links check's target probes with found + status from the
@@ -158,6 +211,10 @@ func (s *supersedeStore) linkMGet(body string) (int, string) {
 	}
 	var docs []string
 	for _, d := range req.Docs {
+		if reason, bad := s.failIDs[d.ID]; bad {
+			docs = append(docs, `{"_index":"velruna","_id":"`+d.ID+`","error":{"type":"unavailable_shards_exception","reason":"`+reason+`"}}`)
+			continue
+		}
 		src, ok := s.docs[d.ID]
 		if !ok {
 			docs = append(docs, `{"_index":"velruna","_id":"`+d.ID+`","found":false}`)

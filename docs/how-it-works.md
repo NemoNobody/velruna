@@ -445,15 +445,17 @@ The link is not part of the value: a value correction keeps it and touches
 neither `observed_at` nor `confirmed_by` — succession states a relation
 between records, not a re-observation of one.
 
-A link's target is protected at the write: retiring a fact that other facts
-point at (`velruna_obsolete`, or a `velruna_patch` status flip to `obsolete`)
-is refused while the edge exists — the refusal names the referrers, and the
-repair is to repoint or retire them first. The check is advisory like every
-check-then-write (a link landing after the probe can still dangle), and data
-can predate the guard, so `velruna links check` (CLI, bounded by `--limit`)
-audits the whole graph in one read: `dangling` (target gone), `unverified`
-(target not verified), `cycle` (the edge loops). Exit 1 when findings exist;
-repair by repointing.
+A link's target is protected at the write: retiring a fact that other
+**verified** facts point at (`velruna_obsolete`, or a `velruna_patch` status
+flip to `obsolete`) is refused while the edge exists — the refusal names the
+referrers, and the repair is to repoint or retire them first (an obsolete
+referrer's edge no longer blocks, and a self-link resolves itself on
+retirement). The check is advisory like every check-then-write (a link
+landing after the probe can still dangle), and data can predate the guard,
+so `velruna links check` (CLI, bounded by `--limit`) audits the whole graph
+in one read: `dangling` (target gone), `unverified` (target not verified),
+`cycle` (the edge loops). Exit codes: 0 clean, 1 findings, 2 the check could
+not run; repair by repointing.
 
 ## Advisory contract and precedence
 

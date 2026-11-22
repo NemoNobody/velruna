@@ -2,6 +2,7 @@ package client
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"strings"
 	"testing"
@@ -199,5 +200,151 @@ func TestCheckLinksStoreFailureIsError(t *testing.T) {
 	})
 	if _, err := c.CheckLinks(context.Background(), 0); err == nil {
 		t.Fatal("a failed scan must not report a clean graph")
+	}
+}
+
+// Only verified referrers hold a target: a retired fact's edge is one
+// readers already tolerate, and counting it would make the last edge of a
+// chain unretirable forever (the documented repair could never finish).
+func TestObsoleteIgnoresObsoleteReferrers(t *testing.T) {
+	store := &supersedeStore{docs: map[string]string{
+		"old":  factJSON("old", "verified", "2026-01-01T00:00:00Z", ""),
+		"gone": factJSON("gone", "obsolete", "2026-02-01T00:00:00Z", "old"),
+	}}
+	c, _ := supersedeClient(t, store)
+	if err := c.Obsolete(context.Background(), "old", "subject gone", nil); err != nil {
+		t.Fatalf("an obsolete referrer must not block retirement: %v", err)
+	}
+}
+
+// A fact that points at itself resolves itself on retirement: edge and
+// target become obsolete together, so it must not deadlock the guard.
+func TestObsoleteSelfLinkDoesNotBlock(t *testing.T) {
+	store := &supersedeStore{docs: map[string]string{
+		"a": factJSON("a", "verified", "2026-01-01T00:00:00Z", "a"),
+	}}
+	c, _ := supersedeClient(t, store)
+	if err := c.Obsolete(context.Background(), "a", "subject gone", nil); err != nil {
+		t.Fatalf("a self-link must not block retirement of its own fact: %v", err)
+	}
+}
+
+// The advertised --limit maximum must work: a store rejects from+size
+// beyond max_result_window, so the client clamps the window and judges
+// truncation from the exact total instead.
+func TestCheckLinksAtLimitMaxStaysUnderTheWindow(t *testing.T) {
+	store := &supersedeStore{docs: map[string]string{
+		"a": factJSON("a", "verified", "2026-01-01T00:00:00Z", "b"),
+		"b": factJSON("b", "verified", "2026-01-01T00:00:00Z", ""),
+	}}
+	c, _ := supersedeClient(t, store)
+	rep, err := c.CheckLinks(context.Background(), linkScanMax)
+	if err != nil {
+		t.Fatalf("CheckLinks at --limit max (fake enforces the result window): %v", err)
+	}
+	if rep.Edges != 1 || rep.Truncated {
+		t.Errorf("edges=%d truncated=%v, want 1/false", rep.Edges, rep.Truncated)
+	}
+}
+
+// An edge the client cannot parse (e.g. a legacy multi-valued
+// superseded_by) must surface as skipped and keep the walk honest about
+// truncation — never silently shrink the count to look complete.
+func TestCheckLinksUnreadableEdgeStaysHonest(t *testing.T) {
+	store := &supersedeStore{docs: map[string]string{
+		"hub": factJSON("hub", "verified", "2026-01-01T00:00:00Z", ""),
+	}}
+	for i := 0; i < 5; i++ {
+		key := "ref-" + string(rune('a'+i))
+		store.docs[key] = factJSON(key, "verified", "2026-02-01T00:00:00Z", "hub")
+	}
+	// The sixth edge is malformed: superseded_by is an array, unparseable
+	// into a single successor.
+	store.docs["multi"] = `{"key":"multi","status":"verified","superseded_by":["hub","other"]}`
+	c, _ := supersedeClient(t, store)
+
+	rep, err := c.CheckLinks(context.Background(), 5)
+	if err != nil {
+		t.Fatalf("CheckLinks: %v", err)
+	}
+	if rep.Total != 6 || rep.Skipped == 0 || !rep.Truncated {
+		t.Errorf("total=%d skipped=%d truncated=%v, want 6/>0/true", rep.Total, rep.Skipped, rep.Truncated)
+	}
+}
+
+// Cycle shapes: a loop rings only its cycle, a lollipop tail stays clean,
+// and a self-loop is a cycle of one.
+func TestCheckLinksCycleShapes(t *testing.T) {
+	store := &supersedeStore{docs: map[string]string{
+		"a": factJSON("a", "verified", "2026-01-01T00:00:00Z", "b"),
+		"b": factJSON("b", "verified", "2026-01-01T00:00:00Z", "c"),
+		"c": factJSON("c", "verified", "2026-01-01T00:00:00Z", "b"),
+	}}
+	c, _ := supersedeClient(t, store)
+	rep, err := c.CheckLinks(context.Background(), 0)
+	if err != nil {
+		t.Fatalf("CheckLinks: %v", err)
+	}
+	cycled := map[string]bool{}
+	for _, f := range rep.Findings {
+		if f.Problem == "cycle" {
+			cycled[f.Key] = true
+		}
+		if f.Key == "a" {
+			t.Errorf("the tail of a lollipop was flagged: %+v", f)
+		}
+	}
+	if !cycled["b"] || !cycled["c"] || len(cycled) != 2 {
+		t.Errorf("cycled = %v, want exactly b and c", cycled)
+	}
+
+	self := &supersedeStore{docs: map[string]string{
+		"s": factJSON("s", "verified", "2026-01-01T00:00:00Z", "s"),
+	}}
+	c2, _ := supersedeClient(t, self)
+	rep2, err := c2.CheckLinks(context.Background(), 0)
+	if err != nil {
+		t.Fatalf("CheckLinks self-loop: %v", err)
+	}
+	if len(rep2.Findings) != 1 || rep2.Findings[0].Problem != "cycle" || rep2.Findings[0].Key != "s" {
+		t.Errorf("self-loop findings = %+v, want one cycle on s", rep2.Findings)
+	}
+}
+
+// More targets than one _mget batch: every batch must be issued and
+// resolved, and exactly the missing target reported once.
+func TestCheckLinksResolvesAcrossMGetBatches(t *testing.T) {
+	store := &supersedeStore{docs: map[string]string{
+		"missing": factJSON("missing", "verified", "2026-01-01T00:00:00Z", "nowhere"),
+	}}
+	for i := 0; i < 104; i++ {
+		tkey := fmt.Sprintf("t%03d", i)
+		store.docs[tkey] = factJSON(tkey, "verified", "2026-01-01T00:00:00Z", "")
+		store.docs["ref-"+tkey] = factJSON("ref-"+tkey, "verified", "2026-02-01T00:00:00Z", tkey)
+	}
+	c, _ := supersedeClient(t, store)
+	rep, err := c.CheckLinks(context.Background(), 0)
+	if err != nil {
+		t.Fatalf("CheckLinks across batches: %v", err)
+	}
+	if len(rep.Findings) != 1 || rep.Findings[0].Key != "missing" || rep.Findings[0].Problem != "dangling" {
+		t.Fatalf("findings = %+v, want exactly the one dangling edge", rep.Findings)
+	}
+}
+
+// A per-document _mget error is a store failure, never a fake dangling link.
+func TestCheckLinksMGetPerDocErrorFailsTheCheck(t *testing.T) {
+	store := &supersedeStore{
+		docs: map[string]string{
+			"a": factJSON("a", "verified", "2026-01-01T00:00:00Z", "b"),
+			"b": factJSON("b", "verified", "2026-01-01T00:00:00Z", ""),
+		},
+		failIDs: map[string]string{"b": "shard unavailable"},
+	}
+	c, _ := supersedeClient(t, store)
+	if _, err := c.CheckLinks(context.Background(), 0); err == nil {
+		t.Fatal("a per-document probe error must fail the check")
+	} else if strings.Contains(err.Error(), "dangling") {
+		t.Errorf("the probe error must not be laundered into a finding: %v", err)
 	}
 }

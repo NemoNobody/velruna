@@ -28,12 +28,25 @@ const (
 	incomingProbeLimit = maxIncomingLinks + 1
 )
 
-// incomingSupersedeRefs returns the keys of facts whose superseded_by points at
-// key, the total count the store reported, and whether the list was truncated.
-// An error is a store failure: the guard could not be checked.
+// incomingSupersedeRefs returns the keys of VERIFIED facts whose superseded_by
+// points at key, the total count the store reported, and whether the list was
+// truncated. An error is a store failure: the guard could not be checked.
+// Only verified referrers block: an obsolete referrer's edge is one readers
+// are already told to tolerate, and counting it would make a retired link
+// hold its target hostage forever (A->B: retire A, and B could never retire).
+// The retiring fact's own self-link is excluded: edge and target are retired
+// together, so it resolves itself.
 func (c *Client) incomingSupersedeRefs(ctx context.Context, key string) ([]string, int, bool, error) {
 	body, err := json.Marshal(map[string]interface{}{
-		"query":   map[string]interface{}{"term": map[string]interface{}{"superseded_by": key}},
+		"query": map[string]interface{}{"bool": map[string]interface{}{
+			"filter": []interface{}{
+				map[string]interface{}{"term": map[string]interface{}{"superseded_by": key}},
+				map[string]interface{}{"term": map[string]interface{}{"status": "verified"}},
+			},
+			"must_not": []interface{}{
+				map[string]interface{}{"term": map[string]interface{}{"key": key}},
+			},
+		}},
 		"size":    incomingProbeLimit,
 		"_source": []string{"key"},
 	})
@@ -87,7 +100,7 @@ func (c *Client) refuseRetireWithIncoming(ctx context.Context, key string) error
 	if total != 1 {
 		what = "facts"
 	}
-	return contractErrorf("retire refused: %d %s still point at %q with superseded_by (%s): "+
+	return contractErrorf("retire refused: %d verified %s still point at %q with superseded_by (%s): "+
 		"repoint or retire them first — 'velruna links check' maps the graph", total, what, key, named)
 }
 
@@ -103,6 +116,10 @@ const (
 	// linkScanMax bounds what --limit may raise the cap to: the check must
 	// stay a bounded read even when asked generously.
 	linkScanMax = 10000
+	// maxResultWindow is the index.max_result_window the store ships with
+	// (buildIndexBody never raises it): a from+size beyond it is a raw 400,
+	// so the scan window must never exceed it.
+	maxResultWindow = 10000
 	// mgetBatch caps one _mget round trip's ids.
 	mgetBatch = 100
 )
@@ -120,7 +137,8 @@ type LinkFinding struct {
 // LinksReport is the outcome of one graph walk.
 type LinksReport struct {
 	Edges     int // edges inspected
-	Total     int // edges the store counted (may be a lower bound)
+	Total     int // edges in the store (exact: track_total_hits)
+	Skipped   int // fetched hits we could not read as an edge
 	Truncated bool
 	Findings  []LinkFinding // sorted by key, then problem
 }
@@ -134,6 +152,13 @@ func (c *Client) CheckLinks(ctx context.Context, limit int) (*LinksReport, error
 	if limit > linkScanMax {
 		limit = linkScanMax
 	}
+	// The +1 probe for "is there more" must not breach the result window:
+	// beyond it the store answers a raw 400. Truncation is judged from the
+	// exact total instead.
+	size := limit + 1
+	if size > maxResultWindow {
+		size = maxResultWindow
+	}
 	body, err := json.Marshal(map[string]interface{}{
 		"query": map[string]interface{}{"bool": map[string]interface{}{
 			"filter": []interface{}{
@@ -145,7 +170,13 @@ func (c *Client) CheckLinks(ctx context.Context, limit int) (*LinksReport, error
 				map[string]interface{}{"term": map[string]interface{}{"superseded_by": ""}},
 			},
 		}},
-		"size":    limit + 1,
+		"size": size,
+		// Exact totals: the truncated suffix states one as fact, and the
+		// default 10000-capped gte estimate would undercount silently.
+		"track_total_hits": true,
+		// A deterministic window: without a sort the inspected edge set
+		// (and with it the findings) shifts between runs.
+		"sort":    []interface{}{map[string]interface{}{"key": "asc"}},
 		"_source": []string{"key", "superseded_by"},
 	})
 	if err != nil {
@@ -163,24 +194,28 @@ func (c *Client) CheckLinks(ctx context.Context, limit int) (*LinksReport, error
 		target string
 	}
 	var edges []edge
+	skipped := 0
 	for _, hit := range resp.Hits.Hits {
 		var doc struct {
 			Key          string `json:"key"`
 			SupersededBy string `json:"superseded_by"`
 		}
 		if err := json.Unmarshal(hit.Source, &doc); err != nil || doc.Key == "" || doc.SupersededBy == "" {
-			// An edge we cannot name cannot be reported; the scan is still
-			// honest about the total it counted.
+			// An edge we cannot name cannot be reported — count it as not
+			// inspected rather than let it vanish silently.
+			skipped++
 			continue
 		}
 		edges = append(edges, edge{key: doc.Key, target: doc.SupersededBy})
 	}
-	report := &LinksReport{Total: resp.Hits.Total.Value}
+	report := &LinksReport{Total: resp.Hits.Total.Value, Skipped: skipped}
 	if len(edges) > limit {
 		edges = edges[:limit]
-		report.Truncated = true
 	}
 	report.Edges = len(edges)
+	// The walk is incomplete whenever the store counted edges we did not
+	// inspect — beyond the window, beyond --limit, or fetched but unreadable.
+	report.Truncated = report.Total > report.Edges
 
 	// Resolve every distinct target once: found + status decide two of the
 	// three findings; the third (cycle) needs only the edge set.

@@ -3,6 +3,7 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"strconv"
 
@@ -33,26 +34,31 @@ func linksCheckCmd() *cobra.Command {
   cycle       the edge is part of a superseded_by loop
 
 The scan is bounded (--limit, default 1000, max 10000 edges); a truncated
-scan says so. Exit code 1 when findings exist, 0 when the graph is clean.
-Repair a finding by repointing the source (velruna_patch superseded_by) or
-retiring it too. Run it occasionally; the write guards prevent most breaks
-but never all of them.`,
+scan says so. Exit codes distinguish outcomes: 0 when the graph is clean,
+1 when findings exist, 2 when the check itself failed (unreachable store) —
+scripts can branch on them without parsing stderr. Repair a finding by
+repointing the source (velruna_patch superseded_by) or retiring it too.
+Run it occasionally; the write guards prevent most breaks but never all
+of them.`,
 		Args: cobra.NoArgs,
 		Run: func(cmd *cobra.Command, args []string) {
 			ctx := context.Background()
 			c, err := newClient()
 			if err != nil {
-				fatalErr(err)
+				fatalCheckFailed(err)
 			}
 			rep, err := c.CheckLinks(ctx, limit)
 			if err != nil {
-				fatalErr(err)
+				fatalCheckFailed(err)
 			}
-			suffix := ""
+			fmt.Printf("links: %d edge(s) inspected", rep.Edges)
+			if rep.Skipped > 0 {
+				fmt.Printf(", %d hit(s) unreadable", rep.Skipped)
+			}
 			if rep.Truncated {
-				suffix = fmt.Sprintf(" (%d in the store; raise --limit)", rep.Total)
+				fmt.Printf(" (%d edges in the store; raise --limit)", rep.Total)
 			}
-			fmt.Printf("links: %d edge(s) inspected%s\n", rep.Edges, suffix)
+			fmt.Println()
 			for _, f := range rep.Findings {
 				fmt.Printf("%-10s %s -> %s: %s\n", f.Problem,
 					strconv.Quote(f.Key), strconv.Quote(f.Target), f.Detail)
@@ -67,4 +73,12 @@ but never all of them.`,
 	}
 	cmd.Flags().IntVar(&limit, "limit", 0, "max edges to inspect (default 1000, max 10000)")
 	return cmd
+}
+
+// fatalCheckFailed separates "the audit could not run" (exit 2) from "the
+// audit ran and found broken edges" (exit 1): an operator must never read a
+// store outage as a clean or broken graph.
+func fatalCheckFailed(err error) {
+	_, _ = io.WriteString(os.Stderr, err.Error()+"\n")
+	os.Exit(2)
 }
