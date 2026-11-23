@@ -69,7 +69,7 @@ notes).
   separated list and validates every node, so a client can reach a cluster
   without a proxy in front of it. `status` reports the list; an unreachable
   store now suggests where to look.
-- a schema version stamped into the facts index (`mappings._meta`: `SchemaVersion = 1`):
+- a schema version stamped into the facts index (`mappings._meta.velruna_schema = 1`):
   a store written by a newer binary is refused once the stored version is read
   (upgrade the binary; if the role cannot read mappings the check is skipped rather
   than guessed), while a store from an older one is upgraded in place (additive

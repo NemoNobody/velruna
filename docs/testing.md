@@ -6,8 +6,9 @@ what was run live against real clusters.
 
 ## Unit & integration (mock transport)
 
-- `make ci` = `go vet` + `go test ./...` + `golangci-lint` — the same gate CI
-  runs on every push (`.github/workflows/ci.yml`).
+- `make ci` = `fmt-check` + `build` + `vet` + `go test ./...` + `golangci-lint` —
+  the same gate CI runs on every push (`.github/workflows/ci.yml`, which also
+  cross-compiles darwin/windows).
 - more than 400 test functions exercise the HTTP contract against a fake
   OpenSearch (`httptest`): which endpoints are called, with what parameters and bodies —
   index creation, composable journal templates, the ingest pipeline,

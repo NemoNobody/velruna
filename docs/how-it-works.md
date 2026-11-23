@@ -89,9 +89,11 @@ never stores a partial document. Blocks skipped by the chrome filter are not a
 loss.
 
 `content_hash` is sha256 over the full extracted text **before** the budget is
-applied and before the secret-guard hook redacts it: it does not depend on
-`max_chars`, `block_chars` or a redaction, so the same page keeps its identity
-regardless of how much of it was stored. `full_chars` is the post-redaction
+applied and before the secret-guard hook redacts it: on the first extraction
+it does not depend on `max_chars`, `block_chars` or a redaction, so the same
+page keeps its identity regardless of how much of it was stored. (A later
+re-extraction from the stored, already-redacted HTML rehashes that text and
+can move the hash.) `full_chars` is the post-redaction
 length of that whole text (a complete snapshot reports `size == full_chars`);
 `size` is the stored text that actually ships.
 
@@ -112,6 +114,7 @@ blocks, orders X..Y`) on a huge document — are read limits, not storage limits
 
 ```
 velruna add <key> <value> <category> [--project <p>] [--source <s>] [--notes <n>] [--summary <s>]
+             [--ttl-days N] [--keyword <k>] [--allow-secret]
 ```
 
 Adds a fact. If the key exists: a different value corrects it (the doc is
@@ -209,7 +212,7 @@ explicit approval.
 ### obsolete
 
 ```
-velruna obsolete <key> [reason]
+velruna obsolete <key> [reason] [--allow-secret]
 ```
 
 Marks the fact `obsolete` because its subject is gone (file deleted, endpoint
@@ -658,7 +661,7 @@ medium leniency is route-based (documentation vs API payload), because page
 content is not authored by the writer.
 
 A redaction is never silent: the fact carries `redactions` (field, pattern,
-size — never the text, so the removed span cannot leak back through a read),
+chars — never the text, so the removed span cannot leak back through a read),
 the journal entry of the accepted value carries the same rows, and the write
 answer repeats them. The rows reach every read shape (`velruna_get`,
 `velruna_search`, `velruna_list`, `velruna_journal`, CLI `get`), so a value

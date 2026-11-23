@@ -394,7 +394,7 @@ Some documentation sites answer a plain fetch with 403/422/429 — they gate
 on the TLS/HTTP2 fingerprint, not the content. `fetch_render: "obscura"`
 enables a fallback: when a plain fetch fails the way bot walls fail (network
 walls, IP-ban statuses — not 404/401, not the allowlist, not oversize), the
-the URL goes to [obscura](https://github.com/h4ckf0r0day/obscura) (Apache-2.0),
+URL goes to [obscura](https://github.com/h4ckf0r0day/obscura) (Apache-2.0),
 a lightweight headless browser with a Chrome-shaped stealth fingerprint. The rendered HTML
 flows through the exact same extract + guard + store pipeline (`via:
 obscura`).

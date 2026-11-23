@@ -100,6 +100,8 @@ curl -k -u "admin:$OPENSEARCH_PASSWORD" "https://127.0.0.1:9200/velruna-restore-
 # compare _count with the live index, sample a known key with velruna get, then:
 curl -k -u "admin:$OPENSEARCH_PASSWORD" -X DELETE \
   "https://127.0.0.1:9200/velruna-restore-test,velruna-restore-test-history-*"
+# (a cluster with action.destructive_requires_name=true rejects the wildcard:
+# delete velruna-restore-test-history-<period> per period instead)
 ```
 
 A full recovery (store lost): create the index name as it was (the mapping is
@@ -126,10 +128,13 @@ Containers lose data when the operator cleans up. Two rules:
 
 The compose stack already declares `/snapshots` (`path.repo`; the image
 entrypoint forwards only dotted lowercase env keys) and bind-mounts it at
-`./os-snapshots`. The dev profile runs plain HTTP with the security plugin
-off, so its calls drop `-k -u` and use `http://127.0.0.1:9200` (or
-`$VELRUNA_OS_PORT`); the `secure` profile declares no snapshot mount, so
-register a location it actually holds out of `path.repo` there.
+`./os-snapshots`. The directory must exist and be writable by the node (uid
+1000): `make dev-opensearch` creates it, and an existing stack has to be
+recreated once so the new `path.repo` setting takes effect. The dev profile
+runs plain HTTP with the security plugin off, so its calls drop `-k -u` and
+use `http://127.0.0.1:9200` (or `$VELRUNA_OS_PORT`). The `secure` profile
+declares neither `path.repo` nor the `/snapshots` mount — add both before
+registering a repository on it.
 Register the repository on the dev location once:
 
 ```bash
