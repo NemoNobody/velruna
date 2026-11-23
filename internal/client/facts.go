@@ -68,6 +68,12 @@ type AddResult struct {
 	// as a value correction (changed=true), and a correction over an
 	// obsolete fact hides the status transition entirely.
 	Resurrected bool
+	// SummaryIgnored: a summary was supplied but the value matched what is
+	// stored, so no new version landed and the summary was dropped. The
+	// answer edges say so instead of hiding the drop — a same-value
+	// resurrection reports Changed=true, so callers cannot derive this
+	// from the flags alone.
+	SummaryIgnored bool
 }
 
 // redactionsForFields keeps the audit rows of the fields this write stores. A
@@ -332,14 +338,14 @@ func (c *Client) Add(ctx context.Context, f *model.Fact) (AddResult, error) {
 			if _, jErr := c.appendJournalID(ctx, entry, ref, "", false); jErr != nil {
 				// The resurrect itself landed (the doc is verified again): the
 				// answer must say so even though the journal entry lagged.
-				return AddResult{Changed: true, Resurrected: true}, fmt.Errorf("add: resurrection accepted, the journal entry lagged: %w", jErr)
+				return AddResult{Changed: true, Resurrected: true, SummaryIgnored: f.Summary != ""}, fmt.Errorf("add: resurrection accepted, the journal entry lagged: %w", jErr)
 			}
 		}
 		// Same value: notes/source moved, observed_at must not (the
 		// observation is old), the journal is untouched — the resurrection
 		// exception above is the one same-value write that IS a new
 		// observation, and it reports Changed=true and Resurrected=true.
-		return AddResult{Changed: resurrect, Resurrected: resurrect}, nil
+		return AddResult{Changed: resurrect, Resurrected: resurrect, SummaryIgnored: f.Summary != ""}, nil
 	}
 
 	if err := c.checkSummaryRequired(f); err != nil {

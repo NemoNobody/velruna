@@ -106,10 +106,11 @@ func AddCmd() *cobra.Command {
 			b.WriteString(" project=")
 			b.WriteString(strconv.Quote(project))
 			b.WriteString("\n")
-			if !res.Created && !res.Changed && addFlags.summary != "" {
+			if res.SummaryIgnored {
 				// Same contract as the MCP touch note: the passed summary is
-				// dropped on a same-value touch (it would rewrite the current
-				// value's table of contents without a new version). Say so.
+				// dropped on a same-value write (it would rewrite the current
+				// value's table of contents without a new version) — including
+				// a same-value resurrection, which reports Changed=true. Say so.
 				b.WriteString("note: the --summary value was ignored on a same-value touch (correct the value to change its summary)\n")
 			}
 			b.WriteString(redactionLines(redactions))

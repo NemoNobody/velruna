@@ -178,6 +178,11 @@ func (s *mcpServer) addOne(ctx context.Context, cfg *config.Config, c *client.Cl
 		}
 	} else if res.Resurrected {
 		out.Note = "resurrected: the fact was obsolete; status is back to verified, observed_at moved, and the event is journaled"
+		if res.SummaryIgnored {
+			// A same-value resurrection still drops the passed summary (no new
+			// version landed); without this hint the drop is silent.
+			out.Note += "; the passed summary was ignored (the stored value was unchanged; correct the value to change its summary)"
+		}
 	}
 	return out, nil
 }

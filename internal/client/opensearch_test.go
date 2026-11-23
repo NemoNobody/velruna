@@ -641,6 +641,57 @@ func TestAddCorrectionOnObsoleteReportsResurrected(t *testing.T) {
 	}
 }
 
+// TestAddSummaryIgnoredFlag: the answer edges hint that a passed summary was
+// dropped — but a same-value RESURRECTION reports Changed=true, so callers
+// cannot derive the drop from the flags. AddResult.SummaryIgnored is the
+// honest signal (round-20 finding: the resurrect note silently swallowed the
+// hint).
+func TestAddSummaryIgnoredFlag(t *testing.T) {
+	liveSrc := `{"fact_id":"fid","key":"k","value":"v","category":"config","project":"proj","status":"verified","created_at":"2020-01-01T00:00:00Z","updated_at":"2020-01-01T00:00:00Z","observed_at":"2020-01-01T00:00:00Z"}`
+	routes := func(r recordedRequest) (int, string) {
+		if code, body := journalRoutesOK(r); code != 500 {
+			return code, body
+		}
+		switch {
+		case r.Method == "GET":
+			return 200, `{"_index":"velruna","_id":"k","found":true,"_source":` + liveSrc + `}`
+		case r.Method == "POST" && strings.Contains(r.Path, "_update"):
+			return 200, `{"result":"updated"}`
+		}
+		return 500, `{"status":500,"error":"unexpected ` + r.Method + " " + r.Path + `"}`
+	}
+	c, _ := newFakeClient(t, routes)
+	f := model.NewFact("k", "v", "config", "proj", "", "")
+	f.Summary = "a toc that must be dropped"
+	res, err := c.Add(context.Background(), f)
+	if err != nil {
+		t.Fatalf("Add (same value with summary): %v", err)
+	}
+	if !res.SummaryIgnored {
+		t.Errorf("res = %+v, want SummaryIgnored=true: the summary cannot rewrite the current value's toc without a new version", res)
+	}
+	// A correction applies the summary: no drop to report.
+	c2, _ := newFakeClient(t, routes)
+	f2 := model.NewFact("k", "v-new", "config", "proj", "", "")
+	f2.Summary = "a toc that lands"
+	res2, err := c2.Add(context.Background(), f2)
+	if err != nil {
+		t.Fatalf("Add (correction with summary): %v", err)
+	}
+	if res2.SummaryIgnored {
+		t.Errorf("res = %+v, want SummaryIgnored=false: the correction stored the summary", res2)
+	}
+	// Same-value touch without a summary: nothing was ignored.
+	c3, _ := newFakeClient(t, routes)
+	res3, err := c3.Add(context.Background(), model.NewFact("k", "v", "config", "proj", "", ""))
+	if err != nil {
+		t.Fatalf("Add (same value, no summary): %v", err)
+	}
+	if res3.SummaryIgnored {
+		t.Errorf("res = %+v, want SummaryIgnored=false (no summary was given)", res3)
+	}
+}
+
 // TestObsoleteMergesReasonRedactions pins the audit contract on the retire
 // path: rows cut from the reason land on the fact next to the CURRENT value's
 // rows (a retirement does not rewrite the value), a row of the same field is

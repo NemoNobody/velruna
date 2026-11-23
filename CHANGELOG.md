@@ -87,6 +87,10 @@ notes).
   `docker/os-snapshots` is a real snapshot location; the docs' backup recipe
   registers `velruna-fs` on it instead of pointing at a location the node
   never declared.
+- re-adding an obsolete fact with the same value (a resurrection) no longer
+  silently drops a passed summary: the CLI and `velruna_add` say the summary
+  was ignored, same as on a plain same-value touch (a resurrection reports
+  changed=true, which had swallowed the hint).
 
 ### Changed
 

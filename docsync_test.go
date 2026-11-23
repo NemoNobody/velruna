@@ -15,6 +15,7 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -27,20 +28,29 @@ import (
 	"github.com/spf13/pflag"
 )
 
-// docFiles: the user-facing prose surfaces scanned by every check here.
+// docFiles: every user-facing .md in the repo (walked recursively so a new
+// docs subdir is covered the day it appears), minus the vendored _ref tree
+// and .git.
 func docFiles(t *testing.T) []string {
 	t.Helper()
 	var files []string
-	for _, dir := range []string{".", "docs", "rules", "docker", "docker/dashboards"} {
-		entries, err := os.ReadDir(dir)
+	err := filepath.WalkDir(".", func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
-			t.Fatalf("read %s: %v", dir, err)
+			return err
 		}
-		for _, e := range entries {
-			if !e.IsDir() && strings.HasSuffix(e.Name(), ".md") {
-				files = append(files, filepath.Join(dir, e.Name()))
+		if d.IsDir() {
+			if p == ".git" || p == "_ref" {
+				return fs.SkipDir
 			}
+			return nil
 		}
+		if strings.HasSuffix(d.Name(), ".md") && !strings.HasPrefix(d.Name(), ".") {
+			files = append(files, p)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("walk for doc files: %v", err)
 	}
 	sort.Strings(files)
 	return files
@@ -96,9 +106,11 @@ func TestNoRetiredPhrases(t *testing.T) {
 func TestReadmeCommandTableMatchesCobra(t *testing.T) {
 	root := cmd.NewRootCmd()
 	subtreeFlags := map[string]map[string]bool{}
+	childNames := map[string]map[string]bool{}
 	var walk func(c *cobra.Command, path string)
 	walk = func(c *cobra.Command, path string) {
 		flags := map[string]bool{}
+		kids := map[string]bool{}
 		for _, add := range []*pflag.FlagSet{c.Flags(), c.PersistentFlags(), c.InheritedFlags()} {
 			add.VisitAll(func(fl *pflag.Flag) { flags[fl.Name] = true })
 		}
@@ -111,6 +123,7 @@ func TestReadmeCommandTableMatchesCobra(t *testing.T) {
 			seen[k] = true
 		}
 		for _, child := range c.Commands() {
+			kids[child.Name()] = true
 			childPath := child.Name()
 			if path != "" {
 				childPath = path + " " + child.Name()
@@ -120,6 +133,7 @@ func TestReadmeCommandTableMatchesCobra(t *testing.T) {
 				seen[k] = true
 			}
 		}
+		childNames[path] = kids
 	}
 	walk(root, "")
 
@@ -140,6 +154,20 @@ func TestReadmeCommandTableMatchesCobra(t *testing.T) {
 			continue
 		}
 		seenCmd[name] = true
+		// Subcommands/alternatives inside the command cell ("creds set\|status\|rm",
+		// "dashboards push") must be registered children too — a typo like
+		// "pulsh" is exactly the drift this table guard exists to catch.
+		for _, tok := range strings.Fields(strings.ReplaceAll(m[2], `\|`, "|")) {
+			if strings.HasPrefix(tok, "-") {
+				continue
+			}
+			for _, alt := range strings.Split(tok, "|") {
+				if alt == "" || childNames[name][alt] {
+					continue
+				}
+				t.Errorf("README table: %q listed under %q but %s has no such subcommand", alt, name, name)
+			}
+		}
 		for _, fm := range flag.FindAllStringSubmatch(l, -1) {
 			if !flags[fm[1]] {
 				t.Errorf("README table: --%s listed for %q but not registered in its subtree", fm[1], name)
@@ -159,81 +187,110 @@ func TestReadmeCommandTableMatchesCobra(t *testing.T) {
 	}
 }
 
-// docOnlyEnv: environment variables the binary honours but the config
-// loader does not read — documented outside the loader's list on purpose.
+// docOnlyEnv: environment variables documented in setup.md that no code in
+// this repo and no compose interpolation consumes — legitimate extras
+// (make-time inputs, external tools' knobs). Keep this map tiny: a new
+// runtime knob belongs in code, not here.
 var docOnlyEnv = map[string]bool{
-	"VELRUNA_KEYRING_COLLECTION":        true,
-	"VELRUNA_KWALLET_NAME":              true,
 	"VELRUNA_SECURE_DEV_PASSWORD":       true, // make-time input, not a runtime knob
 	"GOTOOLCHAIN":                       true,
 	"OPENSEARCH_INITIAL_ADMIN_PASSWORD": true, // the secure compose profile's demo setup
 }
 
-// composeEnvNames: every ${NAME} interpolation in docker/opensearch.yml —
-// compose consumes those itself, so setup.md may document them even though
-// the Go loader never sees them.
+// composeEnvNames: every ${NAME} interpolation in docker/opensearch.yml
+// (forms ${V}, ${V:-d}, ${V-d}, ${V?e}) — compose consumes those itself, so
+// setup.md may document them even though no Go code reads them.
 func composeEnvNames(t *testing.T) map[string]bool {
 	t.Helper()
 	names := map[string]bool{}
-	re := regexp.MustCompile(`\$\{([A-Z][A-Z0-9_]{3,})[:}]`)
+	re := regexp.MustCompile(`\$\{([A-Z][A-Z0-9_]{3,})[:}?-]`)
 	for _, m := range re.FindAllStringSubmatch(readFile(t, "docker/opensearch.yml"), -1) {
 		names[m[1]] = true
 	}
 	return names
 }
 
-// loaderEnvNames: every literal passed to os.Getenv / os.LookupEnv inside
-// internal/config (the loader IS the contract for the env-override list).
-func loaderEnvNames(t *testing.T) map[string]bool {
+// codeEnvNames: every literal passed to os.Getenv / os.LookupEnv across the
+// repo's own Go packages (cmd, internal/...; tests and the vendored _ref
+// tree excluded). Known blind spot: env names passed through variables or
+// constants are invisible to this scan — every current call site is
+// literal; if a refactor indirections them, move the name into a const and
+// extend this scan to const literals rather than dropping the guard.
+func codeEnvNames(t *testing.T) map[string]bool {
 	t.Helper()
 	names := map[string]bool{}
 	fset := token.NewFileSet()
-	pkgs, err := parser.ParseDir(fset, "internal/config", func(fi os.FileInfo) bool {
-		return !strings.HasSuffix(fi.Name(), "_test.go")
-	}, 0)
-	if err != nil {
-		t.Fatalf("parse internal/config: %v", err)
-	}
-	for _, pkg := range pkgs {
-		for _, file := range pkg.Files {
-			ast.Inspect(file, func(n ast.Node) bool {
-				call, ok := n.(*ast.CallExpr)
-				if !ok {
-					return true
-				}
-				sel, ok := call.Fun.(*ast.SelectorExpr)
-				if !ok {
-					return true
-				}
-				pkgID, ok := sel.X.(*ast.Ident)
-				if !ok || pkgID.Name != "os" {
-					return true
-				}
-				if sel.Sel.Name != "Getenv" && sel.Sel.Name != "LookupEnv" {
-					return true
-				}
-				if len(call.Args) != 1 {
-					return true
-				}
-				lit, ok := call.Args[0].(*ast.BasicLit)
-				if !ok || lit.Kind != token.STRING {
-					return true
-				}
-				v := strings.Trim(lit.Value, `"`)
-				names[v] = true
-				return true
-			})
+	var dirs []string
+	err := filepath.WalkDir(".", func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
 		}
+		if d.IsDir() {
+			if p == ".git" || p == "_ref" || p == "docs" || p == "rules" || p == "docker" || p == ".github" {
+				return fs.SkipDir
+			}
+			if (p == "cmd" || p == "internal") || strings.HasPrefix(p, "internal/") || strings.HasPrefix(p, "cmd/") {
+				dirs = append(dirs, p)
+			}
+			return nil
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("walk for go packages: %v", err)
+	}
+	found := 0
+	for _, dir := range dirs {
+		pkgs, err := parser.ParseDir(fset, dir, func(fi os.FileInfo) bool {
+			return !strings.HasSuffix(fi.Name(), "_test.go")
+		}, 0)
+		if err != nil {
+			t.Fatalf("parse %s: %v", dir, err)
+		}
+		for _, pkg := range pkgs {
+			for _, file := range pkg.Files {
+				ast.Inspect(file, func(n ast.Node) bool {
+					call, ok := n.(*ast.CallExpr)
+					if !ok {
+						return true
+					}
+					sel, ok := call.Fun.(*ast.SelectorExpr)
+					if !ok {
+						return true
+					}
+					pkgID, ok := sel.X.(*ast.Ident)
+					if !ok || pkgID.Name != "os" {
+						return true
+					}
+					if sel.Sel.Name != "Getenv" && sel.Sel.Name != "LookupEnv" {
+						return true
+					}
+					if len(call.Args) != 1 {
+						return true
+					}
+					lit, ok := call.Args[0].(*ast.BasicLit)
+					if !ok || lit.Kind != token.STRING {
+						return true
+					}
+					names[strings.Trim(lit.Value, `"`)] = true
+					found++
+					return true
+				})
+			}
+		}
+	}
+	if found == 0 {
+		t.Fatal("code env scan parsed zero os.Getenv/LookupEnv calls — the scan itself broke")
 	}
 	return names
 }
 
 // TestEnvListsMatchTheLoader: the env-var lists in README and setup.md must
-// name exactly what the loader reads — no ghost variables (the OPENSEARCH_-
-// CLUSTER omission survived one full round) and no loader variable left
-// undocumented.
+// name exactly what our code and compose consume — no ghost variables (the
+// OPENSEARCH_CLUSTER omission survived one full round) and no consumed
+// variable left undocumented.
 func TestEnvListsMatchTheLoader(t *testing.T) {
-	loader := loaderEnvNames(t)
+	consumed := codeEnvNames(t)
 	compose := composeEnvNames(t)
 	envToken := regexp.MustCompile("`([A-Z][A-Z0-9_]{3,})`")
 
@@ -245,17 +302,25 @@ func TestEnvListsMatchTheLoader(t *testing.T) {
 				documented[name] = true
 			}
 		}
+		if len(documented) == 0 {
+			t.Fatalf("%s: no backticked env tokens parsed — the doc format changed and this check went blind", f)
+		}
 		for name := range documented {
-			if !loader[name] && !compose[name] && !docOnlyEnv[name] {
-				t.Errorf("%s documents %s but neither internal/config nor docker/opensearch.yml consumes it", f, name)
+			if !consumed[name] && !compose[name] && !docOnlyEnv[name] {
+				t.Errorf("%s documents %s but neither our Go code nor docker/opensearch.yml consumes it", f, name)
 			}
 		}
 	}
-	// setup.md claims its list is complete: every loader var must appear.
+	// setup.md claims its list is complete: every repo-consumed knob var
+	// (our two prefixes; ambient names like DBUS_* are not our contract)
+	// must appear.
 	setup := readFile(t, "docs/setup.md")
-	for name := range loader {
+	for name := range consumed {
+		if !strings.HasPrefix(name, "OPENSEARCH_") && !strings.HasPrefix(name, "VELRUNA_") {
+			continue
+		}
 		if !strings.Contains(setup, "`"+name+"`") {
-			t.Errorf("setup.md env list is complete but misses %s (read by internal/config)", name)
+			t.Errorf("setup.md env list is complete but misses %s (read by our Go code)", name)
 		}
 	}
 }
