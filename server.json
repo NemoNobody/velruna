@@ -7,11 +7,11 @@
     "url": "https://github.com/NemoNobody/velruna",
     "source": "github"
   },
-  "version": "0.9.1",
+  "version": "0.9.5",
   "packages": [
     {
       "registryType": "oci",
-      "identifier": "ghcr.io/nemonobody/velruna:0.9.1",
+      "identifier": "ghcr.io/nemonobody/velruna:0.9.5",
       "transport": {
         "type": "stdio"
       },
