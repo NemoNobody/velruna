@@ -7,8 +7,8 @@ import (
 )
 
 // TestAddVerbNamesResurrection pins the CLI wording: a write that flips an
-// obsolete fact back to verified must say so, including the same-value touch
-// path (where the shape alone reads as "nothing changed").
+// obsolete fact back to verified must say so (Add reports Changed=true on
+// every resurrection path, so a bare "updated" would hide the status flip).
 func TestAddVerbNamesResurrection(t *testing.T) {
 	cases := []struct {
 		name string
@@ -18,7 +18,6 @@ func TestAddVerbNamesResurrection(t *testing.T) {
 		{"birth", client.AddResult{Created: true}, "added"},
 		{"correction", client.AddResult{Changed: true}, "updated"},
 		{"touch", client.AddResult{}, "touched (same value)"},
-		{"same-value resurrection", client.AddResult{Resurrected: true}, "touched (same value), resurrected an obsolete fact"},
 		{"correction resurrection", client.AddResult{Changed: true, Resurrected: true}, "updated, resurrected an obsolete fact"},
 	}
 	for _, c := range cases {

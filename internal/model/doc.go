@@ -21,7 +21,7 @@ type ImageRef struct {
 }
 
 // Redaction records one credential span edited out of a stored snapshot:
-// pattern name and size only, never the matched text (the secret must not
+// pattern name and chars only, never the matched text (the secret must not
 // travel back into agent context).
 type Redaction struct {
 	Field   string `json:"field" jsonschema:"doc field the span was redacted from"`

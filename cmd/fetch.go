@@ -496,7 +496,7 @@ func printDocOutline(w io.Writer, doc *model.Doc, cached, revalidated bool, now 
 	if len(doc.Redactions) > 0 {
 		b.WriteString("redacted: ")
 		b.WriteString(strconv.Itoa(len(doc.Redactions)))
-		b.WriteString(" high-confidence credential span(s) were redacted out of the stored snapshot (the page is stored; pattern/field/size listed, no preview)\n")
+		b.WriteString(" high-confidence credential span(s) were redacted out of the stored snapshot (the page is stored; field/pattern/chars listed, no preview)\n")
 		for _, r := range doc.Redactions {
 			b.WriteString("  - ")
 			b.WriteString(r.Pattern)

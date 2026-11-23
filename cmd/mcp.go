@@ -169,7 +169,7 @@ func runMCPServer(confPath string) error {
 			"git-state corrections in a single round-trip). Per-item guard and " +
 			"confirm_secret (one approved false positive never whitewashes the " +
 			"rest); duplicate keys are rejected; partial success is legal — the " +
-			"per-item answer says changed/reverified/status/redactions/error for each, " +
+			"per-item answer says key/changed/reverified/status/redactions/error for each, " +
 			"with counters on the answer. Same semantics as " +
 			"velruna_patch.",
 	}, s.patchBatch)

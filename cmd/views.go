@@ -41,7 +41,8 @@ func newConfirmerViews(in []model.Confirmer) []confirmerView {
 // factView is the MCP-facing shape of a fact: a stable contract for clients
 // (RFC3339 timestamps, no internal fields) rather than the internal model.
 // In compact mode most fields carry omitempty so the JSON drops them: the
-// compact view is a table of contents (key, summary, state, age), the full
+// compact view is a table of contents (key, summary, category, status,
+// source, notes head, age), the full
 // value is one velruna_get away.
 type factView struct {
 	Key          string            `json:"key" jsonschema:"stable fact key, e.g. proj:foo:loc:bar.py"`

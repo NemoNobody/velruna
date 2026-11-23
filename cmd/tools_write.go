@@ -53,7 +53,7 @@ type addOutput struct {
 	// the fact.
 	Note string `json:"note,omitempty" jsonschema:"what exactly this write did when the shape alone does not say (same-value touch: observed_at and age keep counting, notes move when supplied and the caller's source is recorded; resurrect: an obsolete fact re-declared alive)"`
 	// Redactions names every span the secret guard replaced before storing
-	// (field, detector pattern, size — never the text). Non-empty means the
+	// (field, detector pattern, chars — never the text). Non-empty means the
 	// stored value is SHORTER than the one written: the flag is not noise, it
 	// tells the caller the claim lost a piece.
 	Redactions []model.Redaction `json:"redactions,omitempty" jsonschema:"spans the secret guard replaced before storing (field, pattern, chars); the stored value is shorter than the one written"`

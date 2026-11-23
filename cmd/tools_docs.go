@@ -75,7 +75,7 @@ type fetchDocOutput struct {
 	Hint           string `json:"hint,omitempty" jsonschema:"navigation advice: more blocks, or a truncated snapshot and how to store the rest"`
 
 	// Redactions: high-confidence credential spans edited out of the stored
-	// snapshot (pattern/field/size, no preview): the secret never entered the
+	// snapshot (field/pattern/chars, no preview): the secret never entered the
 	// store, and the answer is transparent about the surgery.
 	Redactions []redactionView `json:"redactions,omitempty" jsonschema:"credential spans redacted out of the stored snapshot (no preview)"`
 	Warning    string          `json:"warning,omitempty" jsonschema:"set when redactions happened: the stored text is edited, quote from it with that in mind"`

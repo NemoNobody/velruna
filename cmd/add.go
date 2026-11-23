@@ -135,8 +135,8 @@ func AddCmd() *cobra.Command {
 }
 
 // addVerb names what the write did. The resurrection suffix keeps the CLI
-// answer honest: a same-value re-add over an obsolete fact prints "touched"
-// but flipped the status back to verified.
+// answer honest: every resurrection path reports Changed=true, so the answer
+// would read "updated" while the status also flipped back to verified.
 func addVerb(res client.AddResult) string {
 	verb := "touched (same value)"
 	switch {
