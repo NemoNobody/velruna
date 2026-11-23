@@ -8,6 +8,8 @@ notes).
 
 ## Unreleased
 
+## v0.9.5 — 2026-11-24
+
 ### Added
 
 - `velruna workset create|list|show|add|remove|phase|rename|delete|cursor` and
