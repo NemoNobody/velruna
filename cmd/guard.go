@@ -167,7 +167,7 @@ func redactionLines(rs []model.Redaction) string {
 		return ""
 	}
 	var b strings.Builder
-	b.WriteString("secret-guard: the stored text was shortened — flagged spans replaced before the write:\n")
+	b.WriteString("secret-guard: the stored text was rewritten — flagged spans replaced before the write:\n")
 	for _, r := range rs {
 		b.WriteString("  - field ")
 		b.WriteString(r.Field)

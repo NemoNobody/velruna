@@ -11,9 +11,13 @@ notes).
 ### Added
 
 - `velruna links check`: one bounded scan plus a batched probe round (`--limit`, default 1000 edges) walks
-  every fact that carries a `superseded_by` link and reports the three ways an
-  edge goes wrong — `dangling` (the target is gone), `unverified` (the target
-  is not verified), `cycle` (the edge loops). Exit 1 when findings exist, exit
+  every live (verified) fact that carries a `superseded_by` link and reports
+  the three ways an edge goes wrong — `dangling` (the target is gone),
+  `unverified` (the target
+  is not verified), `cycle` (the edge loops). Edges on retired facts are
+  counted apart, not reported: retiring a source is how its dead edge leaves
+  the audit (and why the repair line is actionable). Exit 1 when findings
+  exist, exit
   2 when the check itself could not run. A scan that could not audit every
   edge says so and never claims "clean": hits the scan fetched but could not
   read, edges it never fetched, and edges fetched but left unaudited at
@@ -93,8 +97,9 @@ notes).
   if they had been stored. The answer now carries exactly the rows this
   write stored (the notes rows, on a touch); the value rows already on the
   fact are untouched and are not re-announced. `velruna_patch` follows the
-  same rule: a value change reports its value rows, a qualifier-only patch
-  only the rows of the fields it wrote.
+  same rule: a value change reports the rows of the text fields it wrote (the
+  rows of an untouched notes field stay with the fact), a qualifier-only
+  patch only the rows of the fields it wrote.
 - re-adding an obsolete fact with the same value (a resurrection) no longer
   silently drops a passed summary: the CLI and `velruna_add` say the summary
   was ignored, same as on a plain same-value touch (a resurrection reports

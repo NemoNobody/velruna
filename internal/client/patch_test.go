@@ -200,6 +200,33 @@ func TestPatchValueChangeCarriesRedactions(t *testing.T) {
 	if len(qualRes.Redactions) != 1 || qualRes.Redactions[0].Field != "summary" {
 		t.Errorf("res.Redactions = %+v, want exactly the summary row", qualRes.Redactions)
 	}
+
+	// A value change rewrites the value and the summary, not the notes: the
+	// stored notes keep their marker, so the audit must keep their rows too
+	// (round-27: a value-only patch used to drop them while the text stayed).
+	var keepBody string
+	c4, _ := newFakeClient(t, patchRespond(
+		`{"key":"k","value":"v1","category":"config","project":"p","status":"verified","notes":"note with [velruna-redacted:long-hex]","redactions":[{"field":"notes","pattern":"long-hex","chars":48}]}`,
+		&keepBody))
+	keepRows := []model.Redaction{{Field: "value", Pattern: "long-base64", Chars: 44}}
+	if _, err := c4.Patch(context.Background(), "k", PatchFields{Value: "v2", Redactions: keepRows}); err != nil {
+		t.Fatalf("Patch value change keeping notes: %v", err)
+	}
+	keepParams := patchParams(t, keepBody)
+	stored, ok := keepParams["redactions"].([]any)
+	if !ok || len(stored) != 2 {
+		t.Fatalf("params.redactions = %v, want the kept notes row plus the new value row", keepParams["redactions"])
+	}
+	seenFields := map[string]bool{}
+	for _, row := range stored {
+		m, _ := row.(map[string]any)
+		if f, _ := m["field"].(string); f != "" {
+			seenFields[f] = true
+		}
+	}
+	if !seenFields["notes"] || !seenFields["value"] {
+		t.Errorf("stored redactions fields = %v, want notes kept and value replaced", seenFields)
+	}
 }
 
 // TestPatchLongValueRequiresNewSummary keeps add's summary rule on the patch

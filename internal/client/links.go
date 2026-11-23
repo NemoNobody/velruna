@@ -140,9 +140,14 @@ type LinkFinding struct {
 
 // LinksReport is the outcome of one graph walk.
 type LinksReport struct {
-	Edges     int // edges inspected
-	Fetched   int // hits the scan returned (audited + unreadable)
-	Total     int // edges in the store (exact: track_total_hits)
+	Edges   int // live edges inspected
+	Fetched int // hits the scan returned (audited + retired + unreadable)
+	Total   int // edges in the store (exact: track_total_hits)
+	// Retired counts fetched edges whose SOURCE is no longer verified. They are
+	// not audited: the audit looks for live breakage, and retiring a source is
+	// the documented way to take its dead edge out of it (a finding nobody can
+	// act on would keep the check red forever).
+	Retired   int
 	Skipped   int // fetched hits we could not read as an edge
 	Truncated bool
 	Findings  []LinkFinding // sorted by key, then problem
@@ -185,7 +190,7 @@ func (c *Client) CheckLinks(ctx context.Context, limit int) (*LinksReport, error
 		// A deterministic window: without a sort the inspected edge set
 		// (and with it the findings) shifts between runs.
 		"sort":    []interface{}{map[string]interface{}{"key": "asc"}},
-		"_source": []string{"key", "superseded_by"},
+		"_source": []string{"key", "superseded_by", "status"},
 	})
 	if err != nil {
 		return nil, fmt.Errorf("build link scan: %w", err)
@@ -203,10 +208,12 @@ func (c *Client) CheckLinks(ctx context.Context, limit int) (*LinksReport, error
 	}
 	var edges []edge
 	skipped := 0
+	retired := 0
 	for _, hit := range resp.Hits.Hits {
 		var doc struct {
 			Key          string `json:"key"`
 			SupersededBy string `json:"superseded_by"`
+			Status       string `json:"status"`
 		}
 		if err := json.Unmarshal(hit.Source, &doc); err != nil || doc.Key == "" || doc.SupersededBy == "" {
 			// An edge we cannot name cannot be reported — count it as not
@@ -214,16 +221,23 @@ func (c *Client) CheckLinks(ctx context.Context, limit int) (*LinksReport, error
 			skipped++
 			continue
 		}
+		// A status-less doc is treated as live (a legacy fact is not "dead"):
+		// only an explicit non-verified status takes the edge out of the audit.
+		if doc.Status != "" && doc.Status != "verified" {
+			retired++
+			continue
+		}
 		edges = append(edges, edge{key: doc.Key, target: doc.SupersededBy})
 	}
-	report := &LinksReport{Total: resp.Hits.Total.Value, Fetched: len(resp.Hits.Hits), Skipped: skipped}
+	report := &LinksReport{Total: resp.Hits.Total.Value, Fetched: len(resp.Hits.Hits), Skipped: skipped, Retired: retired}
 	if len(edges) > limit {
 		edges = edges[:limit]
 	}
 	report.Edges = len(edges)
 	// The walk is incomplete whenever the store counted edges we did not
 	// inspect — beyond the window, beyond --limit, or fetched but unreadable.
-	report.Truncated = report.Total > report.Edges
+	// Retired edges are inspected-and-set-aside, not missed.
+	report.Truncated = report.Total > report.Edges+report.Retired
 
 	// Resolve every distinct target once: found + status decide two of the
 	// three findings; the third (cycle) needs only the edge set.

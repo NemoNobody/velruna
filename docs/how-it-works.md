@@ -551,8 +551,10 @@ referrers, and the repair is to repoint or retire them first (an obsolete
 referrer's edge no longer blocks, and a self-link resolves itself on
 retirement). The check is advisory like every check-then-write (a link
 landing after the probe can still dangle), and data can predate the guard,
-so `velruna links check` (CLI, bounded by `--limit`) audits the whole graph
-with one bounded scan plus a batched probe round: `dangling` (target gone), `unverified` (target not verified),
+so `velruna links check` (CLI, bounded by `--limit`) audits the live graph
+with one bounded scan plus a batched probe round (edges on retired facts are
+counted apart, not reported — retiring a source is the documented repair):
+`dangling` (target gone), `unverified` (target not verified),
 `cycle` (the edge loops). Exit codes: 0 when the audit found nothing
 broken (the summary says when the graph was not fully audited), 1 findings,
 2 the check could
@@ -666,13 +668,16 @@ content is not authored by the writer.
 A redaction is never silent: the fact carries `redactions` (field, pattern,
 chars — never the text, so the removed span cannot leak back through a read),
 the journal entry of the accepted value carries the same rows, and the write
-answer repeats them. The rows reach every read shape (`velruna_get`,
-`velruna_search`, `velruna_list`, `velruna_journal`, CLI `get`), so a value
-that quietly shrank never reads as a complete claim. The rows follow the text
+answer reports the rows that write stored. The rows reach every read shape
+(`velruna_get`, `velruna_search`, `velruna_list`, `velruna_journal`, CLI
+`get`), so a value that quietly lost a span never reads as a complete claim
+(the marker can be longer or shorter than the span — the signal is the row,
+not a length change). The rows follow the text
 they describe: a field the write overwrites drops its stored row even when the
 new text is clean, appending a line accumulates (the earlier line is still in
 `notes`) while replacing `notes` clears the rows of the lines folded into it,
-and only a value change replaces the whole set (a clean value clears it).
+and a value change replaces the rows of the value and summary it rewrote (a
+clean value clears them) while an untouched `notes` field keeps its rows.
 
 Guarantees and limits:
 

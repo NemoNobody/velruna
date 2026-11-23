@@ -805,7 +805,8 @@ set their own tool timeouts).
   `--allow-secret` / `confirm_secret: true`), `allow` (scanning off). A real
   credential refuses the write; a heuristic hit (a long hash, base64) is
   replaced with `[velruna-redacted:pattern]` and listed in `redactions`, so the
-  stored text ends up shorter than what was written. Detection is best effort:
+  stored text differs from what was written (a marker can be longer or shorter
+  than the span it replaced). Detection is best effort:
   the rule is still the first line of defense.
 - The OpenSearch password lives in the OS keyring (`velruna creds set`), not in
   the config file: `allow_plaintext` is off by default, so a file password is

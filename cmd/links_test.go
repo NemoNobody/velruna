@@ -14,14 +14,25 @@ import (
 func TestLinksSummaryLineCounts(t *testing.T) {
 	// Everything audited: no extra clauses.
 	rep := &client.LinksReport{Edges: 5, Fetched: 5, Total: 5}
-	if got := linksSummaryLine(rep, 0); got != "links: 5 edge(s) inspected" {
+	if got := linksSummaryLine(rep, 0); got != "links: 5 live edge(s) inspected" {
 		t.Errorf("clean scan: %q", got)
+	}
+
+	// Edges on retired facts are counted apart, not reported, and they are
+	// not "fetched but left unaudited" — nothing is left to audit there.
+	rep = &client.LinksReport{Edges: 5, Fetched: 7, Total: 7, Retired: 2}
+	got := linksSummaryLine(rep, 0)
+	if !strings.Contains(got, "2 edge(s) on retired facts") {
+		t.Errorf("retired edges unreported: %q", got)
+	}
+	if strings.Contains(got, "left unaudited") {
+		t.Errorf("retired edges must not read as missed work: %q", got)
 	}
 
 	// Unreadable hits were fetched already: raising --limit recovers
 	// nothing, so the summary must not suggest it.
 	rep = &client.LinksReport{Edges: 5, Fetched: 6, Total: 6, Skipped: 1, Truncated: true}
-	got := linksSummaryLine(rep, 0)
+	got = linksSummaryLine(rep, 0)
 	if !strings.Contains(got, "1 hit(s) carried a superseded_by this client cannot read") {
 		t.Errorf("unreadable hits unreported: %q", got)
 	}

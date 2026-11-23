@@ -254,8 +254,8 @@ func runMCPServer(confPath string) error {
 			"(1000..64000; default fetch_block_chars); the budget drops whole " +
 			"blocks, never cuts one. A second fetch of the " +
 			"same URL returns the stored snapshot (cached=true) until its TTL " +
-			"expires; refresh=true forces a revalidation (a 304 keeps the stored " +
-			"snapshot). block_chars applies when " +
+			"expires; refresh=true forces a fresh check with the origin (a 304 keeps " +
+			"the stored snapshot). block_chars applies when " +
 			"the page is extracted: a cached snapshot with all its text keeps its " +
 			"stored split (a revalidating 304 included), while a truncated snapshot " +
 			"re-extracted for a larger max_chars is re-blocked at the requested " +

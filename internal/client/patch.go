@@ -324,10 +324,11 @@ func (c *Client) Patch(ctx context.Context, key string, p PatchFields) (PatchRes
 
 	now := time.Now().UTC()
 	currentRef := existing.CurrentRef
-	// The audit rows this write lands. A value change REPLACES the set (a clean
-	// value clears it — stale rows would describe text that no longer exists);
-	// a qualifier-only write MERGES its rows in, so the audit of the value it
-	// sits next to stays true.
+	// The audit rows this write lands. A value change replaces the rows of the
+	// text it rewrites (value and summary always; notes only when supplied — an
+	// omitted notes field keeps the stored notes, marker and all, so its rows
+	// must survive too). A qualifier-only write merges its rows in, so the
+	// audit of the value it sits next to stays true.
 	var qualifierRedactions []model.Redaction
 	var replacedFields []string
 	if !valueChanged {
@@ -349,9 +350,14 @@ func (c *Client) Patch(ctx context.Context, key string, p PatchFields) (PatchRes
 		qualifierRedactions = redactionsForFields(p.Redactions, scanFields...)
 	}
 	effectiveRedactions := existing.Redactions
-	if valueChanged {
-		effectiveRedactions = p.Redactions
-	} else if len(replacedFields) > 0 || len(qualifierRedactions) > 0 {
+	switch {
+	case valueChanged:
+		rewritten := []string{"value", "summary"}
+		if p.Notes != "" {
+			rewritten = append(rewritten, "notes")
+		}
+		effectiveRedactions = model.MergeRedactions(existing.Redactions, rewritten, p.Redactions)
+	case len(replacedFields) > 0 || len(qualifierRedactions) > 0:
 		effectiveRedactions = model.MergeRedactions(existing.Redactions, replacedFields, qualifierRedactions)
 	}
 	var entry *model.JournalEntry

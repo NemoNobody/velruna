@@ -28,7 +28,10 @@ func linksCheckCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "check",
 		Short: "Find dangling, unverified or cyclic superseded_by links",
-		Long: fmt.Sprintf(`Walk every fact that carries a superseded_by link and report the broken edges:
+		Long: fmt.Sprintf(`Walk every live (verified) fact that carries a superseded_by link and report
+the broken edges. Edges on retired facts are counted apart, not reported:
+the audit looks for live breakage, and retiring a source is the documented
+way to take its dead edge out of it.
 
   dangling    the target fact does not exist (a reader walks into nothing)
   unverified  the target fact exists but is not verified (obsolete or other)
@@ -76,7 +79,10 @@ of them.`, client.LinkScanDefault, client.LinkScanMax),
 // linksSummaryLine is the pure formatting of the scan accounting, kept out
 // of the Run closure so the honest-counts contract is pinned by tests.
 func linksSummaryLine(rep *client.LinksReport, limit int) string {
-	line := fmt.Sprintf("links: %d edge(s) inspected", rep.Edges)
+	line := fmt.Sprintf("links: %d live edge(s) inspected", rep.Edges)
+	if rep.Retired > 0 {
+		line += fmt.Sprintf(", %d edge(s) on retired facts (not audited — a retired source's edge is dead weight; retiring is how it leaves the audit)", rep.Retired)
+	}
 	if rep.Skipped > 0 {
 		line += fmt.Sprintf(", %d hit(s) carried a superseded_by this client cannot read (not audited)", rep.Skipped)
 	}
@@ -101,7 +107,7 @@ func linksSummaryLine(rep *client.LinksReport, limit int) string {
 			line += fmt.Sprintf(", %d edge(s) beyond the 10000-hit result window (no higher --limit fetches them)", missed)
 		}
 	}
-	if trimmed := rep.Fetched - rep.Edges - rep.Skipped; trimmed > 0 {
+	if trimmed := rep.Fetched - rep.Edges - rep.Retired - rep.Skipped; trimmed > 0 {
 		line += fmt.Sprintf(", %d edge(s) fetched but left unaudited at --limit (raise --limit)", trimmed)
 	}
 	return line
@@ -116,7 +122,7 @@ func linksVerdict(rep *client.LinksReport) string {
 	if rep.Skipped > 0 || rep.Truncated {
 		return "no broken edges among the audited links; the graph was NOT fully audited (see the counts above)"
 	}
-	return "clean: every superseded_by link resolves to a verified fact"
+	return "clean: every superseded_by link on a live fact resolves to a verified fact"
 }
 
 // fatalCheckFailed separates "the audit could not run" (exit 2) from "the

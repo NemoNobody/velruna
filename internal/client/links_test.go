@@ -192,6 +192,39 @@ func TestCheckLinksReportsEveryBreak(t *testing.T) {
 	}
 }
 
+// Edges on retired sources are dead weight: the audit reports live breakage
+// only, counts the retired edges apart (so truncation is never overstated),
+// and the documented repair — retiring the source — really clears the finding
+// (round-27: the advice told users to retire, but the edge stayed reported).
+func TestCheckLinksSkipsRetiredSources(t *testing.T) {
+	store := &supersedeStore{docs: map[string]string{
+		"live":    factJSON("live", "verified", "2026-01-01T00:00:00Z", "ghost"),
+		"retired": factJSON("retired", "obsolete", "2026-01-01T00:00:00Z", "ghost"),
+		"legacy":  `{"key":"legacy","superseded_by":"ghost2"}`,
+	}}
+	c, _ := supersedeClient(t, store)
+
+	rep, err := c.CheckLinks(context.Background(), 0)
+	if err != nil {
+		t.Fatalf("CheckLinks: %v", err)
+	}
+	if rep.Retired != 1 {
+		t.Errorf("retired = %d, want 1 (the obsolete source is counted apart)", rep.Retired)
+	}
+	// The status-less legacy doc is treated as live: a legacy fact is not dead.
+	if rep.Edges != 2 {
+		t.Errorf("edges = %d, want 2 (live + legacy)", rep.Edges)
+	}
+	if rep.Total != 3 || rep.Truncated {
+		t.Errorf("total = %d truncated = %v, want 3/false (the retired edge is inspected, not missed)", rep.Total, rep.Truncated)
+	}
+	for _, f := range rep.Findings {
+		if f.Key == "retired" {
+			t.Errorf("a retired source's edge must not be reported: %+v", f)
+		}
+	}
+}
+
 // The scan is bounded: beyond --limit the report says it is truncated rather
 // than pretending the graph was fully walked.
 func TestCheckLinksTruncates(t *testing.T) {

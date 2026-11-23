@@ -116,8 +116,8 @@ func (s *mcpServer) addOne(ctx context.Context, cfg *config.Config, c *client.Cl
 	//
 	// Identity fields (key, project, source, tags) can only refuse: rewriting a
 	// span there would silently change what the fact IS. Text fields may come
-	// back shortened (a medium-confidence heuristic hit is replaced, not fatal),
-	// and the audit of what was cut travels with the stored fact.
+	// back rewritten (a medium-confidence heuristic hit is replaced by a marker,
+	// not fatal), and the audit of what was cut travels with the stored fact.
 	kwForGuard := strings.Join(in.Keywords, " ")
 	redactions, gErr := guardSanitize(cfg.SecretGuard, in.ConfirmSecret,
 		identityField("key", &in.Key),
@@ -218,10 +218,10 @@ type addBatchItem struct {
 	// failure). Partial success is legal: OpenSearch writes are per-doc, and
 	// a batch transaction would be a fiction.
 	Error string `json:"error,omitempty" jsonschema:"this item's failure (guard/validation/store); other items were processed regardless"`
-	// Redactions is velruna_add's audit per item: the stored value lost a
-	// flagged span. The batch answer must carry it — the per-item outcome is
-	// the only place a caller can see that a write landed shortened.
-	Redactions []model.Redaction `json:"redactions,omitempty" jsonschema:"spans the secret guard replaced before storing (see velruna_add)"`
+	// Redactions is velruna_add's audit per item: a field the write stored lost
+	// a flagged span to the guard's marker. The batch answer must carry it —
+	// the per-item outcome is the only place a caller can see that.
+	Redactions []model.Redaction `json:"redactions,omitempty" jsonschema:"audit rows this write stored (see velruna_add)"`
 }
 
 func (s *mcpServer) addBatch(ctx context.Context, req *mcp.CallToolRequest, in addBatchInput) (*mcp.CallToolResult, addBatchOutput, error) {
@@ -312,8 +312,9 @@ type patchOutput struct {
 	Status     string `json:"status" jsonschema:"status of the fact after the patch"`
 	Reverified bool   `json:"reverified,omitempty" jsonschema:"true when the patch re-confirmed the value in place (observed_at moved, op=rediscovery journaled, value unchanged)"`
 	Note       string `json:"note,omitempty" jsonschema:"set on a qualifier-only touch: observed_at and age untouched, the journal not appended"`
-	// Redactions: see velruna_add — the stored value lost a flagged span.
-	Redactions []model.Redaction `json:"redactions,omitempty" jsonschema:"spans the secret guard replaced before storing (see velruna_add)"`
+	// Redactions: what this patch stored — the value rows on a value change,
+	// the rows of the fields a qualifier-only patch wrote.
+	Redactions []model.Redaction `json:"redactions,omitempty" jsonschema:"audit rows this patch stored: the value rows on a value change, the rows of the fields a qualifier-only patch wrote"`
 }
 
 func (s *mcpServer) patch(ctx context.Context, req *mcp.CallToolRequest, in patchInput) (*mcp.CallToolResult, patchOutput, error) {
@@ -372,7 +373,7 @@ func (s *mcpServer) patchOne(ctx context.Context, cfg *config.Config, c *client.
 	// Every provided field is user-supplied text on a write path — the guard
 	// covers all of them, notes_append and reason included (a secret can
 	// arrive in a dated note as easily as in a value). Same split as add:
-	// identity fields refuse, text fields may come back shortened.
+	// identity fields refuse, text fields may come back rewritten.
 	kwForGuard := strings.Join(in.Keywords, " ")
 	redactions, gErr := guardSanitize(cfg.SecretGuard, in.ConfirmSecret,
 		identityField("key", &in.Key),
@@ -445,7 +446,7 @@ type patchBatchItem struct {
 	Reverified bool              `json:"reverified,omitempty" jsonschema:"see velruna_patch"`
 	Status     string            `json:"status,omitempty" jsonschema:"status of the fact after the patch"`
 	Error      string            `json:"error,omitempty" jsonschema:"this item's failure (guard/validation/store); other items were processed regardless"`
-	Redactions []model.Redaction `json:"redactions,omitempty" jsonschema:"spans the secret guard replaced before storing (see velruna_add)"`
+	Redactions []model.Redaction `json:"redactions,omitempty" jsonschema:"audit rows this patch stored (see velruna_patch)"`
 }
 
 func (s *mcpServer) patchBatch(ctx context.Context, req *mcp.CallToolRequest, in patchBatchInput) (*mcp.CallToolResult, patchBatchOutput, error) {
@@ -515,8 +516,8 @@ type obsoleteInput struct {
 type obsoleteOutput struct {
 	Key    string `json:"key" jsonschema:"the key that was marked obsolete"`
 	Status string `json:"status" jsonschema:"the new status"`
-	// Redactions: see velruna_add — the stored reason text lost a flagged span.
-	Redactions []model.Redaction `json:"redactions,omitempty" jsonschema:"spans the secret guard replaced before storing (see velruna_add)"`
+	// Redactions: the rows of the reason text this write stored.
+	Redactions []model.Redaction `json:"redactions,omitempty" jsonschema:"the rows of the reason text this write stored (see velruna_add)"`
 }
 
 func (s *mcpServer) obsolete(ctx context.Context, req *mcp.CallToolRequest, in obsoleteInput) (*mcp.CallToolResult, obsoleteOutput, error) {

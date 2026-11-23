@@ -274,7 +274,7 @@ the 2 MB `fetch_max_bytes` limit is refused with an error, not trimmed.
 | `velruna prune <key> [--keep N] [--yes]` | Drop old journal entries, keeping the newest N (manual admin tool: destructive, without `--yes` only the plan is printed) |
 | `velruna migrate-history [--project <p>] [--yes]` | Move pre-journal in-doc history arrays into the journal (one-time; plan first, `--yes` to write) |
 | `velruna obsolete <key> [reason] [--allow-secret]` | Mark a fact obsolete because its subject is gone (reason appended to notes) |
-| `velruna links check [--limit N]` | Audit the superseded_by graph in one bounded scan plus a batched probe round: dangling targets, unverified targets, cycles; the summary names what the scan could not audit (partial audits never claim "clean") |
+| `velruna links check [--limit N]` | Audit the superseded_by graph of live (verified) facts in one bounded scan plus a batched probe round: dangling targets, unverified targets, cycles (edges on retired facts are counted apart — retiring a source is the documented repair); the summary names what the scan could not audit (partial audits never claim "clean") |
 | `velruna status [--conf <path>]` | Check connectivity and show the effective configuration (env overrides are listed by name, never values) |
 | `velruna creds set\|status\|rm [--url <u>]` | Manage the OpenSearch password in the OS keyring: `set` reads a hidden prompt (piped stdin for scripts) and keys the entry by store identity — `cluster/<cluster_uuid>` (or `--name <label>`), recorded in the config as `opensearch_cluster`; `status` shows the candidate entries and the source, never a value; `rm [--legacy|--name <label>]` deletes |
 | `velruna fetch <url> [--refresh] [-p <p>] [--allow-secret] [--max-chars N] [--block-chars N]` | Fetch a page into the docs index and print its outline: cache-aware, blocks are read on demand; `--max-chars 0` stores the whole document (default `fetch_doc_chars`), `--block-chars` sets the target block size; github URLs that match a local clone print the file path |
@@ -379,7 +379,8 @@ credential refuses the write; a heuristic hit (an unnamed 40-character hash, a
 base64 blob, an opaque token, a weak assignment) is replaced with
 `[velruna-redacted:pattern]` before the fact is stored and listed in the
 answer's `redactions`, so a legitimate fact is not lost to a false positive —
-but the stored text is then shorter than the one written; a hit in an identity
+but the text then differs from what was written (a marker can be longer or
+shorter than the span it replaced) and is not the complete claim; a hit in an identity
 field (`key`, `project`, `source`, `keywords`; `superseded_by` counts on a
 patch) refuses, because a rewritten key
 is a different fact. A secret with no

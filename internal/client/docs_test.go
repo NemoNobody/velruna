@@ -283,7 +283,7 @@ func TestFetchDocStoresSnapshotThenServesCache(t *testing.T) {
 
 // TestFetchDocRevalidatesWithETag pins the cache-refresh contract end to end:
 // a forced refresh of a stored page sends its ETag, the origin answers 304, and
-// the stored snapshot is kept with only fetched_at/expires_at moved — no body
+// the stored snapshot is kept, only the cache metadata moved — no body
 // download, no content change.
 func TestFetchDocRevalidatesWithETag(t *testing.T) {
 	ft := newFetchTarget(t)

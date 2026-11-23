@@ -50,9 +50,10 @@ type Fact struct {
 
 	// Redactions is the write-time secret-guard audit for the current value:
 	// which spans the guard replaced before storing (field, detector pattern,
-	// chars — never the text). A field can come back shorter than the caller
-	// wrote it, so the record of «what was cut» belongs with the fact: a value
-	// that silently lost a span would otherwise read as a complete claim.
+	// chars — never the text). A field can come back different from what the
+	// caller wrote (the marker may be longer or shorter than the span), so the
+	// record of «what was cut» belongs with the fact: a value that silently
+	// lost a span would otherwise read as a complete claim.
 	Redactions []Redaction `json:"redactions,omitempty" yaml:"redactions,omitempty"`
 
 	// Authorship labels: who/what recorded the fact, on which host, in which

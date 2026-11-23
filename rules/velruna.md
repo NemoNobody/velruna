@@ -165,7 +165,8 @@ plan comes back without `confirm: true`; write only after the user approves.
   hash/base64/opaque token, a weak `password = …`) in a text field is
   **replaced** with `[velruna-redacted:pattern]` and the write proceeds — the
   answer lists `redactions` (field, pattern, chars, never the text), so the
-  stored text is shorter than what you sent; a hit in an identity field
+  stored text differs from what you sent (a marker can be longer or shorter
+  than the span it replaced); a hit in an identity field
   (`key`/`project`/`source`/`keywords`; `superseded_by` counts on a patch) refuses, and so does a value that is
   nothing but a flagged span. Detection is best effort: never store
   passwords, tokens, keys, or customer data. This rule is on you, not on the

@@ -467,8 +467,9 @@ func printDocOutline(w io.Writer, doc *model.Doc, cached, revalidated bool, now 
 		b.WriteString("cached: true\n")
 	}
 	if revalidated {
-		// A 304: the content is the stored one, only the timestamps moved.
-		b.WriteString("revalidated: true (origin answered 304 Not Modified; the stored snapshot was kept — only the timestamps moved, unless a larger budget re-extracted more text from it)\n")
+		// A 304: the content is the stored one; the cache metadata moved
+		// (timestamps, rotated validators, a passed project tag).
+		b.WriteString("revalidated: true (origin answered 304 Not Modified; the stored snapshot was kept — only the cache metadata moved, unless a larger budget re-extracted more text from it)\n")
 	}
 	if doc.Truncated {
 		hint := ""

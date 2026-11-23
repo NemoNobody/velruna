@@ -163,11 +163,16 @@ func (s *supersedeStore) linkSearch(body string) (int, string) {
 			continue
 		}
 		var view struct {
+			Status       string          `json:"status"`
 			SupersededBy json.RawMessage `json:"superseded_by"`
 		}
 		_ = json.Unmarshal([]byte(s.docs[key]), &view)
 		q, _ := json.Marshal(key)
 		source := `{"key":` + string(q)
+		if view.Status != "" {
+			st, _ := json.Marshal(view.Status)
+			source += `,"status":` + string(st)
+		}
 		if len(view.SupersededBy) > 0 {
 			source += `,"superseded_by":` + string(view.SupersededBy)
 		}

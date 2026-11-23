@@ -524,6 +524,54 @@ func TestMCPServerPatchBatchSurfacesPartialSuccess(t *testing.T) {
 	}
 }
 
+// TestMCPServerPatchRedactionsReportStoredRows pins the honesty rule at the
+// MCP edge: the answer's redactions are what the write STORED, not the
+// guard's input rows. A qualifier patch reports its notes row; a value patch
+// reports its value row (round-26: the edge echoed the guard's input rows).
+func TestMCPServerPatchRedactionsReportStoredRows(t *testing.T) {
+	fake := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodHead && r.URL.Path == "/velruna":
+			w.WriteHeader(http.StatusOK)
+		case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/velruna/_doc/"):
+			_, _ = io.WriteString(w, `{"_index":"velruna","_id":"k","_version":1,"_seq_no":3,"_primary_term":1,"found":true,"_source":{"key":"k","value":"old","category":"config","project":"p","status":"verified"}}`)
+		default:
+			_, _ = io.WriteString(w, `{"_index":"velruna","_id":"k","result":"updated"}`)
+		}
+	}))
+	t.Cleanup(fake.Close)
+	session := connectTestServer(t, "OPENSEARCH_URL="+fake.URL)
+	hex := strings.Repeat("a1b2c3d4", 5) // 40 chars: the long-hex heuristic (medium)
+	redactionFields := func(t *testing.T, args map[string]any) []string {
+		t.Helper()
+		res, err := session.CallTool(context.Background(), &mcp.CallToolParams{Name: "velruna_patch", Arguments: args})
+		if err != nil {
+			t.Fatalf("CallTool(velruna_patch %v): %v", args, err)
+		}
+		raw, _ := json.Marshal(res.StructuredContent)
+		var out struct {
+			Redactions []struct {
+				Field string `json:"field"`
+			} `json:"redactions"`
+		}
+		if err := json.Unmarshal(raw, &out); err != nil {
+			t.Fatalf("structured content: %v (%s)", err, raw)
+		}
+		var fields []string
+		for _, r := range out.Redactions {
+			fields = append(fields, r.Field)
+		}
+		return fields
+	}
+	if got := redactionFields(t, map[string]any{"key": "k", "notes": "see token " + hex}); len(got) != 1 || got[0] != "notes" {
+		t.Errorf("qualifier patch redactions = %v, want [notes]", got)
+	}
+	if got := redactionFields(t, map[string]any{"key": "k", "value": "id " + hex}); len(got) != 1 || got[0] != "value" {
+		t.Errorf("value patch redactions = %v, want [value]", got)
+	}
+}
+
 // TestMCPServerObsoleteFailsOnBrokenConfig pins that a config load failure
 // cannot silently disable the secret guard: the guard policy lives in the
 // config, so an unloadable policy must fail the write loudly — never proceed

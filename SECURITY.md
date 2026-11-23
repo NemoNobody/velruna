@@ -16,7 +16,8 @@ response within a few days.
   shape refuses the write, while a medium-confidence heuristic hit (long
   hex/base64, a weak assignment) is replaced with
   `[velruna-redacted:pattern]` before the fact is stored — the answer lists
-  `redactions`, so a stored value can be visibly shorter than the one written.
+  `redactions`, so a stored value can visibly differ from the one written (a
+  marker can be longer or shorter than the span it replaced).
   It is not protection: "Never store secrets" remains a rule for agents (see
   the README). Reports about the store not being encrypted are by design.
 - The OS keyring is **best-effort per platform**: Secret Service on Linux

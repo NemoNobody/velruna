@@ -58,9 +58,10 @@ type fetchDocOutput struct {
 	Stale     bool   `json:"stale,omitempty" jsonschema:"past TTL: re-fetch with velruna_fetch_doc before quoting"`
 	Cached    bool   `json:"cached,omitempty" jsonschema:"true when the stored snapshot was returned (no new content was downloaded)"`
 	// Revalidated names the 304 path: the origin confirmed the stored copy
-	// with HTTP validators, so the content is unchanged and only fetched_at /
-	// expires_at moved. It is a network request, not a cache hit — an agent
-	// asking "did the page change?" needs the difference.
+	// with HTTP validators, so the content is unchanged and only the cache
+	// metadata moved (timestamps, rotated validators, a passed project tag).
+	// It is a network request, not a cache hit — an agent asking "did the page
+	// change?" needs the difference.
 	Revalidated bool                `json:"revalidated,omitempty" jsonschema:"true when the origin answered 304 Not Modified and the stored snapshot was kept (timestamps moved; a larger max_chars may have re-extracted more text from the saved html)"`
 	Truncated   bool                `json:"truncated,omitempty" jsonschema:"extraction hit a limit: the stored text is a prefix"`
 	Via         string              `json:"via,omitempty" jsonschema:"route that served the fetch when not direct: proxy | obscura (audit; obscura means the content was browser-rendered)"`

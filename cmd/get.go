@@ -127,8 +127,9 @@ func printFact(w io.Writer, f *model.Fact, now time.Time, history bool, entries 
 		b.WriteString("\n")
 	}
 	if len(f.Redactions) > 0 {
-		// The stored value is shorter than the one that was written: a reader
-		// must not take it for the complete claim (see the guard's write path).
+		// The stored text no longer matches what was written (the guard's marker
+		// can be longer or shorter than the span): a reader must not take it for
+		// the complete claim (see the guard's write path).
 		b.WriteString("redacted: ")
 		for i, r := range f.Redactions {
 			if i > 0 {
