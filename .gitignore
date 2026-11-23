@@ -28,3 +28,6 @@ _ref/
 # OS
 .DS_Store
 Thumbs.db
+
+# Python bytecode from hack/ scripts
+__pycache__/
