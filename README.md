@@ -263,19 +263,19 @@ the 2 MB `fetch_max_bytes` limit is refused with an error, not trimmed.
 
 | Command | Description |
 |---------|-------------|
-| `velruna add <key> <value> <category> [--project <p>] [--source <s>] [--notes <n>] [--summary <s>] [--allow-secret]` | Add or correct a fact (prints `added`/`updated`/`touched (same value)`; doc-first: the fact points at a preallocated journal entry that is then appended; values over `summary_min_len` require `--summary`) |
+| `velruna add <key> <value> <category> [--project <p>] [--source <s>] [--notes <n>] [--summary <s>] [--ttl-days N] [--keyword <k>] [--allow-secret]` | Add or correct a fact (prints `added`/`updated`/`touched (same value)`; doc-first: the fact points at a preallocated journal entry that is then appended; values over `summary_min_len` require `--summary`) |
 | `velruna get <key> [--history]` | Get a fact by key (history is off by default; `--history` prints the legacy in-doc chain, or the newest journal entries for journal-era facts — the full journal is one `velruna journal` away) |
-| `velruna search <query> [--project <p>] [--category <c>] [--status <s>] [--limit N]` | Full-text search over values, notes and summaries (`--status any` disables the status filter; `--limit 0` = up to 1000, larger values are clamped to it) |
+| `velruna search <query> [--project <p>] [--category <c>] [--status <s>] [--keyword <k>] [--limit N]` | Full-text search over values, notes and summaries (`--status any` disables the status filter; `--limit 0` = up to 1000, larger values are clamped to it) |
 | `velruna keys [prefix] [--match <s>] [--project <p>] [--status <s>]` | Find facts by key: prefix and/or substring (`*`, `?` wildcards in `--match`), across projects |
 | `velruna list <project> [--prefix <p>]` | List all facts for a project, optionally narrowed to a key prefix (trailing `*` allowed) |
-| `velruna journal <key> [--limit N]` | Read the journal: the append-only history of a key, newest first |
+| `velruna journal <key> [--since <ts>] [--until <ts>] [--limit N]` | Read the journal: the append-only history of a key, newest first |
 | `velruna history-info <key>` | Compact journal overview: writes, rediscoveries, time range (no entry text) |
 | `velruna prune <key> [--keep N] [--yes]` | Drop old journal entries, keeping the newest N (manual admin tool: destructive, without `--yes` only the plan is printed) |
 | `velruna migrate-history [--project <p>] [--yes]` | Move pre-journal in-doc history arrays into the journal (one-time; plan first, `--yes` to write) |
 | `velruna obsolete <key> [reason] [--allow-secret]` | Mark a fact obsolete because its subject is gone (reason appended to notes) |
 | `velruna links check [--limit N]` | Audit the superseded_by graph in one bounded read: dangling targets, unverified targets, cycles; the summary names what the scan could not audit (partial audits never claim "clean") |
 | `velruna status [--conf <path>]` | Check connectivity and show the effective configuration (env overrides are listed by name, never values) |
-| `velruna creds set\|status\|rm [--url <u>]` | Manage the OpenSearch password in the OS keyring: `set` reads a hidden prompt (piped stdin for scripts) and keys the entry by store identity — `cluster/<cluster_uuid>` (or `--name <label>`), recorded in the config as `opensearch_cluster`; `status` shows the candidate entries and the source, never a value; `rm [--legacy]` deletes |
+| `velruna creds set\|status\|rm [--url <u>]` | Manage the OpenSearch password in the OS keyring: `set` reads a hidden prompt (piped stdin for scripts) and keys the entry by store identity — `cluster/<cluster_uuid>` (or `--name <label>`), recorded in the config as `opensearch_cluster`; `status` shows the candidate entries and the source, never a value; `rm [--legacy|--name <label>]` deletes |
 | `velruna fetch <url> [--refresh] [-p <p>] [--allow-secret] [--max-chars N] [--block-chars N]` | Fetch a page into the docs index and print its outline: cache-aware, blocks are read on demand; `--max-chars 0` stores the whole document (default `fetch_doc_chars`), `--block-chars` sets the target block size; github URLs that match a local clone print the file path |
 | `velruna doc <hash> [n\|--section N] [--blocks N] [--full]` | Read a stored document: the outline (default), block `n`, `--blocks N` consecutive blocks, or every block with `--full` (answers are capped at 32000 runes; `next` names the next block; one block is always returned whole even when it alone exceeds the cap) |
 | `velruna docs <query> [--limit N] [-p <p>]` | BM25 search over stored documents (the extracted blocks, never the raw page) |
@@ -291,7 +291,7 @@ Key convention: the key names a **stable subject**, not its current value —
 `demo:api:port`, not `demo:api:v1`. Re-using the same key with a new value is a
 correction (over an obsolete fact it resurrects the fact too): the fact points
 at a fresh journal entry (doc-first) and the entry is appended under it;
-re-adding the same value updates notes/source (plus
+re-adding the same value updates notes/source when supplied (plus
 `category`, and `ttl_days`/`keywords` when given) — except an obsolete fact,
 whose re-add resurrects it (journaled, `observed_at` moves).
 

@@ -422,7 +422,8 @@ in front:
 
 Environment variables override the file (the complete list; `velruna status`
 lists the active ones by name, never by value):
-`OPENSEARCH_URL`, `OPENSEARCH_URLS`, `OPENSEARCH_USER`, `OPENSEARCH_PASSWORD`,
+`OPENSEARCH_URL`, `OPENSEARCH_URLS`, `OPENSEARCH_CLUSTER`, `OPENSEARCH_USER`,
+`OPENSEARCH_PASSWORD`,
 `OPENSEARCH_INSECURE_SKIP_VERIFY`, `VELRUNA_CONF`, `VELRUNA_INDEX`,
 `VELRUNA_HISTORY_PERIOD`, `VELRUNA_HISTORY_LIMIT`, `VELRUNA_SUMMARY_MIN_LEN`,
 `VELRUNA_SUMMARY_MAX_LEN`, `VELRUNA_SECRET_GUARD`,
@@ -497,7 +498,9 @@ sources:
   Debian/Ubuntu):
 
   ```bash
-  curl -k -u admin:"$(secret-tool lookup service velruna username 127.0.0.1:9200)" \
+  # creds names the entry after the store, not a node: "cluster/<opensearch_cluster>"
+  # (recorded in the config file; point jq at the file your setup uses)
+  curl -k -u admin:"$(secret-tool lookup service velruna username "cluster/$(jq -r .opensearch_cluster "${VELRUNA_CONF:-$HOME/.velruna.conf}")")" \
        https://127.0.0.1:9200
   ```
 

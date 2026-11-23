@@ -132,7 +132,7 @@ mounted config that carries it.
 - a config file is not mandatory: `-e OPENSEARCH_URL`, `-e OPENSEARCH_USER` and
   `-e OPENSEARCH_PASSWORD` (or an `--env-file`) are enough for a
   container-only setup;
-- pin a version (`:0.9.0`), not `:latest`;
+- pin a version (`:0.8.10`), not `:latest`;
 - facts written from a container carry the container's OS user as author
   (`nonroot`) — set `VELRUNA_AUTHOR` / `VELRUNA_HOST` to keep provenance
   readable for the other sessions reading the store.

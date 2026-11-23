@@ -72,7 +72,8 @@ Bundle invariants (OSD 3.x quirks, all learned live):
 
 Panel inventory (18 visualizations + the dashboard): 6 KPI tiles (facts,
 journal entries, docs cached, facts with history, obsolete facts, Docs past
-TTL — a filtered metric over `expires_at`, the last two are filtered),
+TTL — a filtered metric over `expires_at`; three of the six are filtered:
+facts with history, obsolete facts and Docs past TTL),
 3 time-area charts (facts updates / journal writes /
 docs fetched over time), journal ops histogram, journal entries per period
 index, three donuts (project/category/status), three docs breakdowns (by
