@@ -405,6 +405,7 @@ func TestMCPServerAddBatchSurfacesPartialSuccess(t *testing.T) {
 			Key     string `json:"key"`
 			Created bool   `json:"created"`
 			Changed bool   `json:"changed"`
+			Note    string `json:"note"`
 			Error   string `json:"error"`
 		} `json:"items"`
 	}
@@ -439,6 +440,17 @@ func TestMCPServerAddBatchSurfacesPartialSuccess(t *testing.T) {
 		if touch.Error != "" || touch.Created || touch.Changed {
 			t.Errorf("the same-value items must be clean non-created touches, got %+v: %s", touch, raw)
 		}
+		// The per-item note is the batch twin of the singular velruna_add
+		// note: a batch caller must see same-value honesty too (round-21).
+		if !strings.Contains(touch.Note, "same-value touch") {
+			t.Errorf("the same-value item must carry the same-value note, got %+v: %s", touch, raw)
+		}
+	}
+	if !strings.Contains(out.Items[1].Note, "same-value touch") {
+		t.Errorf("the clean touch row must carry the note, got %+v: %s", out.Items[1], raw)
+	}
+	if out.Items[3].Note != "" {
+		t.Errorf("a clean birth must not carry a same-value note, got %q", out.Items[3].Note)
 	}
 	// The aggregate must agree with the rows (the patch twin pins the same):
 	// a summary that contradicts what the items say is the audit lie the

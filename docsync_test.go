@@ -157,9 +157,13 @@ func TestReadmeCommandTableMatchesCobra(t *testing.T) {
 		seenCmd[name] = true
 		// The first token of the command cell is the subcommand (or the
 		// `set\|status\|rm` alternative chain — captured whole by the `[^`]*`
-		// group, then split on the normalized pipe). A typo like "pulsh" or a
+		// group, then split on the normalized pipe; write the chain without
+		// spaces or Fields() will break it apart). A typo like "pulsh" or a
 		// stale alternative is exactly the drift this guard exists to catch.
-		// Positional/flag/bracket tokens never match `subcmd` and are skipped.
+		// Positional/flag tokens never match `subcmd` and are skipped.
+		// Known limit: subcommands named in the DESCRIPTION cell (e.g.
+		// dashboards gen-fields) are not validated — prose parsing invites
+		// false positives.
 		cell := strings.ReplaceAll(m[2], `\|`, "|")
 		if toks := strings.Fields(cell); len(toks) > 0 {
 			for _, alt := range strings.Split(toks[0], "|") {
@@ -195,7 +199,6 @@ func TestReadmeCommandTableMatchesCobra(t *testing.T) {
 // (make-time inputs, external tools' knobs). Keep this map tiny: a new
 // runtime knob belongs in code, not here.
 var docOnlyEnv = map[string]bool{
-	"GOTOOLCHAIN":                       true,
 	"OPENSEARCH_INITIAL_ADMIN_PASSWORD": true, // a container env the secure profile SETS, never interpolates
 }
 

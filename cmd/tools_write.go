@@ -198,7 +198,7 @@ type addBatchOutput struct {
 	Count int `json:"count" jsonschema:"number of items processed"`
 	// Summary counters: the whole-session ritual without re-reading items.
 	Created int            `json:"created" jsonschema:"items newly created"`
-	Changed int            `json:"changed" jsonschema:"items that accepted a journaled event: new version or resurrection (includes created)"`
+	Changed int            `json:"changed" jsonschema:"items that accepted a new version or a resurrection (includes created); a lagged journal follow-up still counts what landed, the item error names it"`
 	Touched int            `json:"touched" jsonschema:"items touched on the same value (no new version)"`
 	Items   []addBatchItem `json:"items" jsonschema:"per-item outcome in request order; a failed item does not roll back the others"`
 }

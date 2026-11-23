@@ -110,12 +110,13 @@ func AddCmd() *cobra.Command {
 				// Same contract as the MCP note: the passed summary is dropped on
 				// a same-value write (it would rewrite the current value's table
 				// of contents without a new version) — including a same-value
-				// resurrection, which reports Changed=true. Say so; patch is the
-				// way to move a summary alone.
+				// resurrection, which reports Changed=true. The advice must be
+				// executable FROM THE CLI (there is no `velruna patch` command;
+				// only the MCP edge may name velruna_patch).
 				if res.Resurrected {
-					b.WriteString("note: the --summary value was ignored (the stored value was unchanged; velruna patch can change a summary without a new version)\n")
+					b.WriteString("note: the --summary value was ignored (the stored value was unchanged; re-add with a corrected value to set a summary)\n")
 				} else {
-					b.WriteString("note: the --summary value was ignored on a same-value touch (velruna patch can change a summary without a new version)\n")
+					b.WriteString("note: the --summary value was ignored on a same-value touch (correct the value to change its summary)\n")
 				}
 			}
 			b.WriteString(redactionLines(redactions))
