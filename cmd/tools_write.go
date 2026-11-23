@@ -462,9 +462,11 @@ func (s *mcpServer) patchBatch(ctx context.Context, req *mcp.CallToolRequest, in
 		item := patchBatchItem{Key: strings.TrimSpace(it.Key), Changed: res.Changed, Status: res.Status, Reverified: res.Reverified, Redactions: res.Redactions}
 		if err != nil {
 			// Batch label, same as velruna_add_batch: the item failed, not
-			// the single-patch tool. Strip both single-patch labels — a
-			// contract rejection arrives as "velruna_patch:", a store-
-			// wrapped failure as "velruna_patch failed:" (writeFailure).
+			// the single-patch tool. Strip both single-patch labels — the
+			// MCP-edge rejections (empty key, not-found) arrive as
+			// "velruna_patch:", a store-wrapped failure as "velruna_patch
+			// failed:" (writeFailure); client-side shape errors carry only
+			// "patch: " and pass through unchanged.
 			msg := err.Error()
 			for _, p := range []string{"velruna_patch: ", "velruna_patch failed: "} {
 				msg = strings.TrimPrefix(msg, p)

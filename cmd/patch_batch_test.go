@@ -38,7 +38,7 @@ func TestPatchBatchDuplicateKeysRejected(t *testing.T) {
 // status) is a per-item shape error, never a batch failure.
 func TestPatchBatchGuardRunsBeforeStore(t *testing.T) {
 	t.Setenv("VELRUNA_SECRET_GUARD", "reject")
-	t.Setenv("VELRUNA_OPENSEARCH_URL", "http://127.0.0.1:9")
+	t.Setenv("OPENSEARCH_URL", "http://127.0.0.1:9")
 	s := &mcpServer{}
 	in := patchBatchInput{Items: []patchInput{
 		{Key: "k1", NotesAppend: "clean note"},

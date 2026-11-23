@@ -44,7 +44,7 @@ func TestMCPSearchKeywordShapedLikeTheWriteEdge(t *testing.T) {
 // TestMCPPruneNegativeKeepRefused (finding 132): a negative keep used to
 // collapse silently into the configured default.
 func TestMCPPruneNegativeKeepRefused(t *testing.T) {
-	t.Setenv("VELRUNA_OPENSEARCH_URL", "http://127.0.0.1:9")
+	t.Setenv("OPENSEARCH_URL", "http://127.0.0.1:9")
 	t.Setenv("VELRUNA_ALLOW_PLAINTEXT", "1")
 	t.Setenv("OPENSEARCH_PASSWORD", "testpw")
 	s := &mcpServer{}
@@ -57,7 +57,7 @@ func TestMCPPruneNegativeKeepRefused(t *testing.T) {
 // TestMCPAddBatchItemErrorLabel (finding 131): a failed batch item is
 // labeled as the batch item, not as the single-add tool.
 func TestMCPAddBatchItemErrorLabel(t *testing.T) {
-	t.Setenv("VELRUNA_OPENSEARCH_URL", "http://127.0.0.1:9")
+	t.Setenv("OPENSEARCH_URL", "http://127.0.0.1:9")
 	t.Setenv("VELRUNA_ALLOW_PLAINTEXT", "1")
 	t.Setenv("OPENSEARCH_PASSWORD", "testpw")
 	s := &mcpServer{}

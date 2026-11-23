@@ -24,7 +24,7 @@ func TestMCPKeysShapeErrorsBeforeStore(t *testing.T) {
 	}
 	// A padded prefix is a query: it must proceed past the guard (the store
 	// path is unreachable here — a store error, never the empty-query text).
-	t.Setenv("VELRUNA_OPENSEARCH_URL", "http://127.0.0.1:9")
+	t.Setenv("OPENSEARCH_URL", "http://127.0.0.1:9")
 	t.Setenv("VELRUNA_ALLOW_PLAINTEXT", "1")
 	t.Setenv("OPENSEARCH_PASSWORD", "testpw")
 	if _, _, err := s.keys(context.Background(), nil, keysInput{Prefix: " k "}); err == nil ||
@@ -64,7 +64,7 @@ func TestAddBatchDuplicateKeysRejected(t *testing.T) {
 // store — proving rejection happens offline.
 func TestAddBatchGuardRunsBeforeStore(t *testing.T) {
 	t.Setenv("VELRUNA_SECRET_GUARD", "reject")
-	t.Setenv("VELRUNA_OPENSEARCH_URL", "http://127.0.0.1:9")
+	t.Setenv("OPENSEARCH_URL", "http://127.0.0.1:9")
 	s := &mcpServer{}
 	in := addBatchInput{Items: []addInput{
 		{Key: "k1", Value: "clean value", Category: "config"},
