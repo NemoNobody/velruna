@@ -289,14 +289,22 @@ func codeEnvNames(t *testing.T) map[string]bool {
 	}
 	found := 0
 	for _, dir := range dirs {
-		pkgs, err := parser.ParseDir(fset, dir, func(fi os.FileInfo) bool {
-			return !strings.HasSuffix(fi.Name(), "_test.go")
-		}, 0)
+		// parser.ParseFile per file rather than ParseDir (deprecated in Go
+		// 1.25 for ignoring build tags): the scan is literal-only, so an
+		// exact package layout is not needed.
+		entries, err := os.ReadDir(dir)
 		if err != nil {
-			t.Fatalf("parse %s: %v", dir, err)
+			t.Fatalf("read %s: %v", dir, err)
 		}
-		for _, pkg := range pkgs {
-			for _, file := range pkg.Files {
+		for _, e := range entries {
+			if e.IsDir() || !strings.HasSuffix(e.Name(), ".go") || strings.HasSuffix(e.Name(), "_test.go") {
+				continue
+			}
+			file, err := parser.ParseFile(fset, filepath.Join(dir, e.Name()), nil, 0)
+			if err != nil {
+				t.Fatalf("parse %s: %v", filepath.Join(dir, e.Name()), err)
+			}
+			{
 				ast.Inspect(file, func(n ast.Node) bool {
 					call, ok := n.(*ast.CallExpr)
 					if !ok {
