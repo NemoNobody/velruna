@@ -50,6 +50,8 @@ func NewRootCmd() *cobra.Command {
 		DashboardsCmd(),
 		CredsCmd(),
 		LinksCmd(),
+		WorksetCmd(),
+		ExecCmd(),
 		McpCmd(),
 	)
 	return root

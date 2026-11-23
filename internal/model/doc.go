@@ -122,7 +122,9 @@ type Doc struct {
 	Truncated bool `json:"truncated,omitempty"`
 
 	// FetchedBy is the hostname that performed the fetch and Via the route
-	// (direct|proxy): audit in the shared-store, multi-machine setup.
+	// (direct|proxy|obscura|exec): audit in the shared-store, multi-machine
+	// setup. exec marks a document captured from a command's output instead of
+	// fetched from a URL.
 	FetchedBy string `json:"fetched_by,omitempty"`
 	Via       string `json:"via,omitempty"`
 

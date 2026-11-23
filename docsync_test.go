@@ -376,7 +376,9 @@ var proseAfterVelruna = map[string]bool{
 // nonToolTokens: velruna_-prefixed identifiers that are stored field/key
 // names, not MCP tool references.
 var nonToolTokens = map[string]string{
-	"velruna_schema": "mappings._meta.velruna_schema, the stored schema version key",
+	"velruna_schema":                  "mappings._meta.velruna_schema, the stored schema version key",
+	"velruna_worksets_schema":         "mappings._meta.velruna_worksets_schema, the worksets schema key",
+	"velruna_worksets_history_schema": "mappings._meta.velruna_worksets_history_schema, the worksets journal schema key",
 }
 
 // TestHintReferencesExist: user-facing strings in cmd/ and internal/ name CLI

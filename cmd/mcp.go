@@ -293,6 +293,8 @@ func runMCPServer(confPath string) error {
 			"facts, not pages.",
 	}, s.searchDocs)
 
+	registerWorksetTools(srv, s)
+
 	err := srv.Run(context.Background(), &mcp.StdioTransport{})
 	if errors.Is(err, io.EOF) {
 		// Normal shutdown: the client closed the connection.

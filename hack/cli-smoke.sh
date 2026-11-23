@@ -61,5 +61,15 @@ step "journal after prune"     $BIN journal "$K:one"
 step "migrate-history"         $BIN migrate-history
 step "docs search (empty ok)"  $BIN docs "definitely-nosuch-term-xyz"
 
+WS="smoke$(date +%s)$$"
+step "workset create"        $BIN workset create "$WS" --project smoke
+step "workset list"          $BIN workset list --project smoke;     check "list shows the workset" "$WS"
+step "workset rename"        $BIN workset rename "$WS" "${WS}x"
+step "workset old slug"      $BIN workset show "$WS";             check "alias still resolves" "${WS}x"
+neg  "workset delete needs --yes" $BIN workset delete "${WS}x"
+step "workset delete"        $BIN workset delete "${WS}x" --yes
+step "exec (capture)"        $BIN exec --force -- echo smoke exec output;  check "exec reports changed" "status: changed"
+step "exec (dedupe)"         $BIN exec -- echo smoke exec output;  check "exec reports unchanged" "status: unchanged"
+
 echo "smoke: $PASSES passed, $FAILS failed (run prefix $K)"
 [ "$FAILS" -eq 0 ]

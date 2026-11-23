@@ -94,6 +94,24 @@ type Config struct {
 	// a small trusted set that searches cheaply.
 	DocsIndexName string `json:"docs_index_name"`
 
+	// WorksetsIndexName is the index that holds worksets: named ordered lists
+	// of fact references used for multi-agent coordination. Separate from the
+	// facts index for the same reason as docs — a different document shape
+	// with its own schema version.
+	WorksetsIndexName string `json:"worksets_index_name"`
+
+	// WorksetsHistoryIndexPeriod is the date granularity of the worksets
+	// journal indices (day|week|month|quarter|year). Empty inherits
+	// HistoryIndexPeriod: one setting keeps every journal aligned by default,
+	// while a dedicated value still allows a different granularity.
+	WorksetsHistoryIndexPeriod string `json:"worksets_history_index_period"`
+
+	// WorksetTakeoverSeconds is how long an entry in in_progress or blocked
+	// may sit untouched before another author may take it over without an
+	// explicit --takeover. Zero is rejected: a zero window would defeat the
+	// ownership lock entirely.
+	WorksetTakeoverSeconds int `json:"workset_takeover_seconds"`
+
 	// IndexReplicas is the replica count stamped on every velruna index the
 	// client creates (facts, docs, journal template). -1 (default) = auto:
 	// a lone data node gets 0 (a replica there could never assign: permanent
@@ -246,18 +264,22 @@ func DefaultConfig() *Config {
 		// TLS verification is on by default: credentials and facts must not
 		// transit a MITM-able channel. Self-signed dev clusters (the common
 		// local case) set insecure_skip_verify explicitly.
-		InsecureSkipVerify:  false,
-		IndexName:           "velruna",
-		HistoryLimit:        20,
-		HistoryIndexPeriod:  PeriodMonth,
-		SecretGuard:         GuardReject,
-		DocsIndexName:       "velruna-docs",
-		IndexReplicas:       -1,
-		FetchTimeoutSeconds: 30,
-		FetchMaxBytes:       2_000_000,
-		FetchBlockChars:     8000,
-		FetchDocChars:       100_000,
-		DocsTTLDays:         90,
+		InsecureSkipVerify: false,
+		IndexName:          "velruna",
+		HistoryLimit:       20,
+		HistoryIndexPeriod: PeriodMonth,
+		SecretGuard:        GuardReject,
+		DocsIndexName:      "velruna-docs",
+		WorksetsIndexName:  "velruna-worksets",
+		// Empty inherits HistoryIndexPeriod (see the field comment).
+		WorksetsHistoryIndexPeriod: "",
+		WorksetTakeoverSeconds:     3600,
+		IndexReplicas:              -1,
+		FetchTimeoutSeconds:        30,
+		FetchMaxBytes:              2_000_000,
+		FetchBlockChars:            8000,
+		FetchDocChars:              100_000,
+		DocsTTLDays:                90,
 		// A browser-shaped UA by default: several documentation sites 403
 		// known bot strings. The fetch still identifies itself honestly in
 		// robots handling; this is a UA, not a fingerprint.
@@ -299,7 +321,8 @@ func LoadConfig() (*Config, error) {
 // VELRUNA_HISTORY_LIMIT, VELRUNA_HISTORY_PERIOD, VELRUNA_SUMMARY_MIN_LEN,
 // VELRUNA_SUMMARY_MAX_LEN, VELRUNA_SECRET_GUARD, VELRUNA_ALLOW_PLAINTEXT,
 // VELRUNA_AUTHOR, VELRUNA_MODEL, VELRUNA_HOST, VELRUNA_SESSION,
-// VELRUNA_DOCS_INDEX, VELRUNA_FETCH_TIMEOUT, VELRUNA_FETCH_MAX_BYTES,
+// VELRUNA_DOCS_INDEX, VELRUNA_WORKSETS_INDEX, VELRUNA_WORKSETS_HISTORY_PERIOD,
+// VELRUNA_WORKSET_TAKEOVER_SECONDS, VELRUNA_FETCH_TIMEOUT, VELRUNA_FETCH_MAX_BYTES,
 // VELRUNA_FETCH_BLOCK_CHARS, VELRUNA_FETCH_DOC_CHARS,
 // VELRUNA_DOCS_TTL_DAYS, VELRUNA_FETCH_HOSTS (comma-separated),
 // VELRUNA_FETCH_USER_AGENT, VELRUNA_FETCH_PROXY_URL,
@@ -453,6 +476,26 @@ func loadConfig(explicitPath string, finder func() string) (*Config, error) {
 	}
 	if v := os.Getenv("VELRUNA_DOCS_INDEX"); v != "" {
 		cfg.DocsIndexName = v
+	}
+	if v := os.Getenv("VELRUNA_WORKSETS_INDEX"); v != "" {
+		cfg.WorksetsIndexName = v
+	}
+	if v := os.Getenv("VELRUNA_WORKSETS_HISTORY_PERIOD"); v != "" {
+		p, err := normalizePeriod(v)
+		if err != nil {
+			return nil, fmt.Errorf("VELRUNA_WORKSETS_HISTORY_PERIOD: %w", err)
+		}
+		cfg.WorksetsHistoryIndexPeriod = p
+	}
+	if v := os.Getenv("VELRUNA_WORKSET_TAKEOVER_SECONDS"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil {
+			return nil, fmt.Errorf("VELRUNA_WORKSET_TAKEOVER_SECONDS: %w", err)
+		}
+		if n <= 0 {
+			return nil, fmt.Errorf("VELRUNA_WORKSET_TAKEOVER_SECONDS: must be > 0, got %d", n)
+		}
+		cfg.WorksetTakeoverSeconds = n
 	}
 	if v := os.Getenv("VELRUNA_FETCH_TIMEOUT"); v != "" {
 		n, err := strconv.Atoi(v)
@@ -779,41 +822,44 @@ func KeyringAccounts(cfg *Config) []string {
 // "absent" (keep the default false: TLS verification stays ON) is
 // distinguishable from an explicit true (opt in to unverified TLS).
 type fileConfig struct {
-	OpenSearchURL       string   `json:"opensearch_url"`
-	OpenSearchURLs      []string `json:"opensearch_urls"`
-	OpenSearchCluster   string   `json:"opensearch_cluster"`
-	OpenSearchUser      string   `json:"opensearch_user"`
-	OpenSearchPassword  string   `json:"opensearch_password"`
-	InsecureSkipVerify  *bool    `json:"insecure_skip_verify"`
-	IndexName           string   `json:"index_name"`
-	HistoryLimit        *int     `json:"history_limit"`
-	HistoryIndexPeriod  *string  `json:"history_index_period"`
-	SecretGuard         *string  `json:"secret_guard"`
-	DocsIndexName       string   `json:"docs_index_name"`
-	IndexReplicas       *int     `json:"index_replicas"`
-	FetchTimeoutSeconds *int     `json:"fetch_timeout_seconds"`
-	FetchMaxBytes       *int     `json:"fetch_max_bytes"`
-	FetchBlockChars     *int     `json:"fetch_block_chars"`
-	FetchDocChars       *int     `json:"fetch_doc_chars"`
-	DocsTTLDays         *int     `json:"docs_ttl_days"`
-	FetchAllowHosts     []string `json:"fetch_allow_hosts"`
-	FetchUserAgent      string   `json:"fetch_user_agent"`
-	FetchRender         string   `json:"fetch_render"`
-	FetchObscuraPath    string   `json:"fetch_obscura_path"`
-	FetchObscuraStealth *bool    `json:"fetch_obscura_stealth"`
-	FetchRespectRobots  *bool    `json:"fetch_respect_robots"`
-	FetchProxyURL       string   `json:"fetch_proxy_url"`
-	FetchProxyFallback  *bool    `json:"fetch_proxy_fallback"`
-	FetchAllowPrivate   *bool    `json:"fetch_allow_private"`
-	LocalRepoRoots      []string `json:"local_repo_roots"`
-	LocalRepoScanDepth  *int     `json:"local_repo_scan_depth"`
-	AllowPlaintext      *bool    `json:"allow_plaintext"`
-	Author              *string  `json:"author"`
-	Model               *string  `json:"model"`
-	Host                *string  `json:"host"`
-	Session             *string  `json:"session"`
-	SummaryMinLen       *int     `json:"summary_min_len"`
-	SummaryMaxLen       *int     `json:"summary_max_len"`
+	OpenSearchURL              string   `json:"opensearch_url"`
+	OpenSearchURLs             []string `json:"opensearch_urls"`
+	OpenSearchCluster          string   `json:"opensearch_cluster"`
+	OpenSearchUser             string   `json:"opensearch_user"`
+	OpenSearchPassword         string   `json:"opensearch_password"`
+	InsecureSkipVerify         *bool    `json:"insecure_skip_verify"`
+	IndexName                  string   `json:"index_name"`
+	HistoryLimit               *int     `json:"history_limit"`
+	HistoryIndexPeriod         *string  `json:"history_index_period"`
+	SecretGuard                *string  `json:"secret_guard"`
+	DocsIndexName              string   `json:"docs_index_name"`
+	WorksetsIndexName          string   `json:"worksets_index_name"`
+	WorksetsHistoryIndexPeriod *string  `json:"worksets_history_index_period"`
+	WorksetTakeoverSeconds     *int     `json:"workset_takeover_seconds"`
+	IndexReplicas              *int     `json:"index_replicas"`
+	FetchTimeoutSeconds        *int     `json:"fetch_timeout_seconds"`
+	FetchMaxBytes              *int     `json:"fetch_max_bytes"`
+	FetchBlockChars            *int     `json:"fetch_block_chars"`
+	FetchDocChars              *int     `json:"fetch_doc_chars"`
+	DocsTTLDays                *int     `json:"docs_ttl_days"`
+	FetchAllowHosts            []string `json:"fetch_allow_hosts"`
+	FetchUserAgent             string   `json:"fetch_user_agent"`
+	FetchRender                string   `json:"fetch_render"`
+	FetchObscuraPath           string   `json:"fetch_obscura_path"`
+	FetchObscuraStealth        *bool    `json:"fetch_obscura_stealth"`
+	FetchRespectRobots         *bool    `json:"fetch_respect_robots"`
+	FetchProxyURL              string   `json:"fetch_proxy_url"`
+	FetchProxyFallback         *bool    `json:"fetch_proxy_fallback"`
+	FetchAllowPrivate          *bool    `json:"fetch_allow_private"`
+	LocalRepoRoots             []string `json:"local_repo_roots"`
+	LocalRepoScanDepth         *int     `json:"local_repo_scan_depth"`
+	AllowPlaintext             *bool    `json:"allow_plaintext"`
+	Author                     *string  `json:"author"`
+	Model                      *string  `json:"model"`
+	Host                       *string  `json:"host"`
+	Session                    *string  `json:"session"`
+	SummaryMinLen              *int     `json:"summary_min_len"`
+	SummaryMaxLen              *int     `json:"summary_max_len"`
 }
 
 // splitHosts parses a comma-separated host list, dropping empty entries.
@@ -901,6 +947,28 @@ func loadFile(cfg *Config, path string) error {
 	}
 	if c.DocsIndexName != "" {
 		cfg.DocsIndexName = c.DocsIndexName
+	}
+	if c.WorksetsIndexName != "" {
+		cfg.WorksetsIndexName = c.WorksetsIndexName
+	}
+	if c.WorksetsHistoryIndexPeriod != nil {
+		// An explicit empty string means "inherit HistoryIndexPeriod"; a
+		// non-empty value must name a known granularity.
+		if v := strings.TrimSpace(*c.WorksetsHistoryIndexPeriod); v == "" {
+			cfg.WorksetsHistoryIndexPeriod = ""
+		} else {
+			p, err := normalizePeriod(v)
+			if err != nil {
+				return fmt.Errorf("config %s: worksets_history_index_period: %w", path, err)
+			}
+			cfg.WorksetsHistoryIndexPeriod = p
+		}
+	}
+	if c.WorksetTakeoverSeconds != nil {
+		if *c.WorksetTakeoverSeconds <= 0 {
+			return fmt.Errorf("config %s: workset_takeover_seconds: must be > 0, got %d", path, *c.WorksetTakeoverSeconds)
+		}
+		cfg.WorksetTakeoverSeconds = *c.WorksetTakeoverSeconds
 	}
 	if c.FetchTimeoutSeconds != nil {
 		cfg.FetchTimeoutSeconds = *c.FetchTimeoutSeconds

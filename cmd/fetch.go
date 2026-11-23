@@ -476,7 +476,13 @@ func printDocOutline(w io.Writer, doc *model.Doc, cached, revalidated bool, now 
 		if doc.FullChars == 0 || doc.Size < doc.FullChars {
 			// Text is missing and a bigger budget can add it; a truncation from
 			// dropped image refs or a single oversized block has nothing to add.
-			hint = "; store the whole page with --max-chars 0"
+			if doc.Via == client.ViaExec {
+				// exec keeps the head and tail of a command's stream, so the way
+				// to get the dropped middle is a new capture, not a fetch budget.
+				hint = "; re-run with a bigger --max-bytes --force"
+			} else {
+				hint = "; store the whole page with --max-chars 0"
+			}
 		}
 		b.WriteString("truncated: true (extraction hit a limit; the stored text is a prefix")
 		b.WriteString(hint)
