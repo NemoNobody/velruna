@@ -41,7 +41,7 @@ type addInput struct {
 type addOutput struct {
 	Key     string `json:"key" jsonschema:"the stored key"`
 	Created bool   `json:"created" jsonschema:"true when the fact was newly created, false when an existing fact was updated"`
-	Changed bool   `json:"changed" jsonschema:"true when a new version was accepted (birth, value correction, status transition); false = same-value touch: notes/source move when supplied, observed_at and the journal untouched"`
+	Changed bool   `json:"changed" jsonschema:"true when a new version was accepted (birth, value correction, status transition); false = same-value touch: notes/source move when supplied, category always, ttl_days/keywords when given; observed_at and the journal untouched"`
 	Status  string `json:"status" jsonschema:"status of the stored fact"`
 	// PreviousSummary names the superseded version at zero journal cost:
 	// the summary the accepted correction replaced ("" when the prior fact
@@ -462,8 +462,14 @@ func (s *mcpServer) patchBatch(ctx context.Context, req *mcp.CallToolRequest, in
 		item := patchBatchItem{Key: strings.TrimSpace(it.Key), Changed: res.Changed, Status: res.Status, Reverified: res.Reverified, Redactions: res.Redactions}
 		if err != nil {
 			// Batch label, same as velruna_add_batch: the item failed, not
-			// the single-patch tool.
-			item.Error = "velruna_patch_batch item " + strconv.Itoa(i) + ": " + strings.TrimPrefix(err.Error(), "velruna_patch: ")
+			// the single-patch tool. Strip both single-patch labels — a
+			// contract rejection arrives as "velruna_patch:", a store-
+			// wrapped failure as "velruna_patch failed:" (writeFailure).
+			msg := err.Error()
+			for _, p := range []string{"velruna_patch: ", "velruna_patch failed: "} {
+				msg = strings.TrimPrefix(msg, p)
+			}
+			item.Error = "velruna_patch_batch item " + strconv.Itoa(i) + ": " + msg
 		}
 		// Counters read what landed (the add_batch rule): a partial success
 		// did change the fact; the error names its lagged follow-up.

@@ -40,8 +40,8 @@ func ValidOp(op string) bool {
 // journal index (one doc per entry, op_type=create). The journal is append-only:
 // entries are immutable after the fact, corrections append a new entry, and
 // "history" is a query over this log. Entry ids are preallocated by the
-// writer before any write lands (a fresh uuid on the scripted paths, a
-// content hash on the birth and migration paths); the fact's main doc keeps
+// writer before any write lands (a fresh uuid on the correction and
+// resurrection paths, a content hash on the birth and migration paths); the fact's main doc keeps
 // current_ref = the entry id of its current value, so "the journal contains
 // the current value" is decided before either write.
 type JournalEntry struct {

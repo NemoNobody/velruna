@@ -276,7 +276,9 @@ func statusIs(err error, code int) bool {
 }
 
 // AppendJournal appends one accepted entry (op_type=create: appends never
-// overwrite each other) and returns the entry id.
+// overwrite each other) and returns the entry id. The id is left empty on
+// purpose so the store mints it: this helper is test-only, every production
+// path preallocates the id before the write (see model.JournalEntry).
 func (c *Client) AppendJournal(ctx context.Context, e *model.JournalEntry) (string, error) {
 	return c.appendJournalID(ctx, e, "", "", false)
 }

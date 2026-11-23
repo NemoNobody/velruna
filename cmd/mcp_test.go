@@ -501,6 +501,9 @@ func TestMCPServerPatchBatchSurfacesPartialSuccess(t *testing.T) {
 	if it.Error == "" {
 		t.Fatalf("the journal failure must be reported per item: %s", raw)
 	}
+	if strings.Contains(it.Error, "velruna_patch failed") {
+		t.Errorf("item error must not carry the single-patch failure label, only the batch one: %s", raw)
+	}
 	if !it.Changed {
 		t.Errorf("item.changed = false, want true (the value change landed; only the journal lagged): %s", raw)
 	}
