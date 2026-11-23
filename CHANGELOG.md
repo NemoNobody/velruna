@@ -8,6 +8,21 @@ notes).
 
 ## Unreleased
 
+### Added
+
+- `server.json`: the server is published to the official MCP Registry as
+  `io.github.NemoNobody/velruna` — an OCI package over the released image,
+  stdio transport, with the OpenSearch connection as the required environment
+  (`OPENSEARCH_URL`, `OPENSEARCH_USER`, `OPENSEARCH_PASSWORD`;
+  `VELRUNA_ALLOW_PLAINTEXT` optional for development).
+
+### Changed
+
+- container image: the runtime image defaults to `velruna mcp`, so a bare
+  `docker run` speaks MCP over stdio (the dev compose stack still runs
+  `status`), and it carries the registry ownership label
+  `io.modelcontextprotocol.server.name`.
+
 ## v0.9.0 — 2026-11-23
 
 ### Added

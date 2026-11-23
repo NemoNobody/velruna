@@ -156,7 +156,7 @@ Or run the container (release tags only, `linux/amd64` + `linux/arm64`):
 docker run -i --rm --user "$(id -u):$(id -g)" \
   -v ~/.velruna.conf:/etc/velruna/velruna.conf:ro \
   -e VELRUNA_CONF=/etc/velruna/velruna.conf -e OPENSEARCH_PASSWORD \
-  ghcr.io/nemonobody/velruna:0.8.10 mcp
+  ghcr.io/nemonobody/velruna:0.9.1 mcp
 ```
 
 `--user` keeps a `0600` config readable (without it the image's uid 65532 needs
@@ -166,6 +166,10 @@ The image is distroless and runs as uid 65532; a container has no session bus,
 so the password comes from the environment or the mounted config, not from the
 OS keyring — [docs/setup.md](docs/setup.md) §2 and
 [docs/mcp.md](docs/mcp.md#running-from-the-container-image).
+
+The server is also listed in the official MCP Registry as
+`io.github.NemoNobody/velruna` (`server.json`; the OCI package points at the
+same image, and a bare `docker run` now speaks MCP).
 
 You also need a reachable OpenSearch (a single local node is enough). Quickest:
 `make dev-opensearch` runs one in a container (localhost-only, security plugin

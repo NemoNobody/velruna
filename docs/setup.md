@@ -212,18 +212,18 @@ docker run --rm -i --user "$(id -u):$(id -g)" \
   -v ~/.velruna.conf:/etc/velruna/velruna.conf:ro \
   -e VELRUNA_CONF=/etc/velruna/velruna.conf \
   -e OPENSEARCH_PASSWORD \
-  ghcr.io/nemonobody/velruna:0.8.10 status
+  ghcr.io/nemonobody/velruna:0.9.1 status
 
 # No config file at all: the connection can come from the environment
 OPENSEARCH_URL=https://os.example:9200 OPENSEARCH_USER=admin docker run --rm -i \
   -e OPENSEARCH_URL -e OPENSEARCH_USER -e OPENSEARCH_PASSWORD \
-  ghcr.io/nemonobody/velruna:0.8.10 status
+  ghcr.io/nemonobody/velruna:0.9.1 status
 
 # MCP over stdio: the client starts the process, so the container is run with -i
 docker run -i --rm --user "$(id -u):$(id -g)" \
   -v ~/.velruna.conf:/etc/velruna/velruna.conf:ro \
   -e VELRUNA_CONF=/etc/velruna/velruna.conf -e OPENSEARCH_PASSWORD \
-  ghcr.io/nemonobody/velruna:0.8.10 mcp
+  ghcr.io/nemonobody/velruna:0.9.1 mcp
 ```
 
 Or bring up OpenSearch and run velruna against it (the Dashboards UI stays

@@ -35,11 +35,19 @@ RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -trimpath \
 FROM gcr.io/distroless/static-debian12:nonroot
 COPY --from=build /out/velruna /velruna
 
+# Ownership label for the official MCP Registry: it is compared byte-for-byte
+# against the server.json `name` when the registry verifies the OCI package.
+LABEL io.modelcontextprotocol.server.name="io.github.NemoNobody/velruna"
+
 # No VELRUNA_CONF default on purpose: the binary's own lookup (--conf,
 # VELRUNA_CONF, ./velruna.conf, next to the binary, ~/.velruna.conf) then works
 # unchanged, and `docker run -e OPENSEARCH_URL -e OPENSEARCH_PASSWORD` needs no
 # config file at all. A mounted config is still the normal setup — see
 # docs/setup.md. A container has no session bus, so the OS keyring is
 # unreachable: the password comes from the environment or the config file.
+
+# A bare `docker run <image>` is the MCP server over stdio; the dev compose
+# stack and `docker run <image> status` override the command.
+CMD ["mcp"]
 
 ENTRYPOINT ["/velruna"]

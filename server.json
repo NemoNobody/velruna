@@ -1,0 +1,47 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.NemoNobody/velruna",
+  "title": "Velruna",
+  "description": "Verified-fact memory for AI agents: facts with source, date and edit history on OpenSearch.",
+  "repository": {
+    "url": "https://github.com/NemoNobody/velruna",
+    "source": "github"
+  },
+  "version": "0.9.1",
+  "packages": [
+    {
+      "registryType": "oci",
+      "identifier": "ghcr.io/nemonobody/velruna:0.9.1",
+      "transport": {
+        "type": "stdio"
+      },
+      "environmentVariables": [
+        {
+          "name": "OPENSEARCH_URL",
+          "description": "OpenSearch endpoint the server reads and writes (velruna does not embed a store).",
+          "isRequired": true,
+          "format": "string"
+        },
+        {
+          "name": "OPENSEARCH_USER",
+          "description": "OpenSearch username.",
+          "isRequired": true,
+          "format": "string"
+        },
+        {
+          "name": "OPENSEARCH_PASSWORD",
+          "description": "OpenSearch password (kept in the client's secret store, never in the image).",
+          "isRequired": true,
+          "isSecret": true,
+          "format": "string"
+        },
+        {
+          "name": "VELRUNA_ALLOW_PLAINTEXT",
+          "description": "Set to 1 to allow a plain http:// endpoint during development.",
+          "isRequired": false,
+          "format": "string"
+        }
+      ]
+    }
+  ]
+}

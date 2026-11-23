@@ -106,7 +106,7 @@ mounted config that carries it.
         "-e", "VELRUNA_CONF=/etc/velruna/velruna.conf",
         "-e", "OPENSEARCH_PASSWORD",
         "-v", "/home/me/.velruna.conf:/etc/velruna/velruna.conf:ro",
-        "ghcr.io/nemonobody/velruna:0.8.10",
+        "ghcr.io/nemonobody/velruna:0.9.1",
         "mcp"
       ]
     }
