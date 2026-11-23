@@ -62,6 +62,7 @@ install:
 # Dev/single-machine OpenSearch: single node, localhost-only,
 # security plugin off (the dev rule), named data volume, snapshots on the host.
 dev-opensearch:
+	@mkdir -p $(dir $(OSFILE))os-snapshots
 	$(CONTAINER) -f $(OSFILE) --profile single up -d
 
 dev-opensearch-down:
@@ -135,6 +136,7 @@ docker-smoke: docker-build
 # not left running: a stdio MCP server has nothing to do until a client starts
 # it, and an exited container lying around is just confusing.
 stack-up:
+	@mkdir -p $(dir $(OSFILE))os-snapshots
 	$(CONTAINER) -f $(OSFILE) --profile single up -d
 	@echo "waiting for OpenSearch on http://127.0.0.1:$${VELRUNA_OS_PORT:-9200} ..."
 	@ok=""; for i in $$(seq 1 60); do \

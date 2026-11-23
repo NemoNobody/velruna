@@ -71,7 +71,7 @@ func identityField(name string, dst *string) *guardTarget {
 // allow: the operator opted out; nothing is scanned.
 //
 // Redaction is never silent: the returned audit rows name the field, the
-// pattern and the size (never the text) and travel with the stored fact.
+// pattern and the chars (never the text) and travel with the stored fact.
 //
 // The error lists masked findings only — echoing the matched text back would
 // leak it a second time through the error path.
@@ -159,7 +159,7 @@ func guardRefusal(level string, findings []secretguard.Finding) error {
 }
 
 // redactionLines renders the audit rows for a human reading CLI output. It
-// names the pattern and the size only: the removed text must not travel back
+// names the pattern and the chars only: the removed text must not travel back
 // into the terminal (or the shell history).
 func redactionLines(rs []model.Redaction) string {
 	if len(rs) == 0 {
