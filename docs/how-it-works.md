@@ -20,6 +20,7 @@ document keyed by its `key` (the key is the document ID).
 | `observed_at` | date | when the current value was seen (moves only on value change) |
 | `ttl_days` | integer | optional per-fact staleness override, capped by the category TTL |
 | `keywords` | keyword[] | normalized tags: lowercase single tokens, deduped, max 10 |
+| `redactions` | object[] | write-time secret-guard audit: which spans were replaced (field, detector pattern, size) — never the text |
 | `source` | keyword | `tool:read_file \| experiment \| user:confirmed \| doc:*` |
 | `notes` | text | free-text qualifiers (omitted when empty; obsolete reasons appended here) |
 | `summary` | text | short table-of-contents rendering of the value; required when the value is over `summary_min_len` (see below) |

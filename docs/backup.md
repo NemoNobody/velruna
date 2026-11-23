@@ -122,3 +122,14 @@ Containers lose data when the operator cleans up. Two rules:
   of the volume → `down`. The repository location must be declared in the
   container's `opensearch.yml` the same way as above (bind-mount the directory
   so copying it out is trivial).
+
+The compose stack already declares `/snapshots` (`OPENSEARCH_PATH_REPO`) and
+bind-mounts it at `./os-snapshots`. Register the repository on that location
+once:
+
+```bash
+curl -k -u "admin:$OPENSEARCH_PASSWORD" -X PUT \
+  "https://127.0.0.1:9200/_snapshot/velruna-fs" \
+  -H 'Content-Type: application/json' \
+  -d '{"type":"fs","settings":{"location":"/snapshots","compress":true}}'
+```

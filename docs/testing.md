@@ -85,7 +85,8 @@ skip unless the flag is set.
 ## Not yet covered (known gaps)
 
 - **secure profile** (`make dev-opensearch-secure`, https + demo certs) —
-  infrastructure ready, live run pending.
+  exercised: the CLI smoke runs against it over https (dev nodes on 9299
+  plain and 9443 secure); CI does not start it yet.
 - **Windows Credential Manager policy** (locked store, dismissed prompt) — the
   `windows` CI job does create/read/delete on every push, but these paths are
   unexplored.

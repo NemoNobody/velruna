@@ -155,7 +155,7 @@ Or run the container (release tags only, `linux/amd64` + `linux/arm64`):
 docker run -i --rm --user "$(id -u):$(id -g)" \
   -v ~/.velruna.conf:/etc/velruna/velruna.conf:ro \
   -e VELRUNA_CONF=/etc/velruna/velruna.conf -e OPENSEARCH_PASSWORD \
-  ghcr.io/nemonobody/velruna:0.8.9 mcp
+  ghcr.io/nemonobody/velruna:0.8.10 mcp
 ```
 
 `--user` keeps a `0600` config readable (without it the image's uid 65532 needs
@@ -273,13 +273,14 @@ the 2 MB `fetch_max_bytes` limit is refused with an error, not trimmed.
 | `velruna prune <key> [--keep N] [--yes]` | Drop old journal entries, keeping the newest N (manual admin tool: destructive, without `--yes` only the plan is printed) |
 | `velruna migrate-history [--project <p>] [--yes]` | Move pre-journal in-doc history arrays into the journal (one-time; plan first, `--yes` to write) |
 | `velruna obsolete <key> [reason] [--allow-secret]` | Mark a fact obsolete because its subject is gone (reason appended to notes) |
-| `velruna links check [--limit N]` | Audit the superseded_by graph in one bounded read: dangling targets, unverified targets, cycles; the summary names what the scan could not audit (partial audits never claim "clean") |
+| `velruna links check [--limit N]` | Audit the superseded_by graph in one bounded scan plus a batched probe round: dangling targets, unverified targets, cycles; the summary names what the scan could not audit (partial audits never claim "clean") |
 | `velruna status [--conf <path>]` | Check connectivity and show the effective configuration (env overrides are listed by name, never values) |
 | `velruna creds set\|status\|rm [--url <u>]` | Manage the OpenSearch password in the OS keyring: `set` reads a hidden prompt (piped stdin for scripts) and keys the entry by store identity — `cluster/<cluster_uuid>` (or `--name <label>`), recorded in the config as `opensearch_cluster`; `status` shows the candidate entries and the source, never a value; `rm [--legacy|--name <label>]` deletes |
 | `velruna fetch <url> [--refresh] [-p <p>] [--allow-secret] [--max-chars N] [--block-chars N]` | Fetch a page into the docs index and print its outline: cache-aware, blocks are read on demand; `--max-chars 0` stores the whole document (default `fetch_doc_chars`), `--block-chars` sets the target block size; github URLs that match a local clone print the file path |
 | `velruna doc <hash> [n\|--section N] [--blocks N] [--full]` | Read a stored document: the outline (default), block `n`, `--blocks N` consecutive blocks, or every block with `--full` (answers are capped at 32000 runes; `next` names the next block; one block is always returned whole even when it alone exceeds the cap) |
 | `velruna docs <query> [--limit N] [-p <p>]` | BM25 search over stored documents (the extracted blocks, never the raw page) |
 | `velruna mcp` | Run as an MCP server over stdio |
+| `velruna dashboards push [--conf <p>] [--index <i>] [--file <f>]` | Push the embedded OpenSearch Dashboards bundle into the store's `.kibana` index (`velruna dashboards gen-fields` regenerates the bundle's field list) |
 
 Exit codes: `0` success, `1` any error, `3` the named key does not exist
 (`get`/`obsolete`/`prune`) — scripts can tell a missing fact from an

@@ -10,7 +10,7 @@ notes).
 
 ### Added
 
-- `velruna links check`: one bounded read (`--limit`, default 1000 edges) walks
+- `velruna links check`: one bounded scan plus a batched probe round (`--limit`, default 1000 edges) walks
   every fact that carries a `superseded_by` link and reports the three ways an
   edge goes wrong — `dangling` (the target is gone), `unverified` (the target
   is not verified), `cycle` (the edge loops). Exit 1 when findings exist, exit

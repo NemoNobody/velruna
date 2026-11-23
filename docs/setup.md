@@ -68,8 +68,9 @@ For a dev node, `velruna.conf` uses dummy credentials with plaintext allowed
 ```
 
 Containers love to lose data: before `make dev-opensearch-down` take a
-snapshot (repository `velruna-fs` → `/snapshots` → `docker/os-snapshots/`) —
-see [backup.md](backup.md) §5.
+snapshot. The compose stack mounts `/snapshots` at `docker/os-snapshots/`
+(`OPENSEARCH_PATH_REPO`), but the `velruna-fs` repository still has to be
+registered on that location once — see [backup.md](backup.md) §5.
 
 ### Dashboards (optional UI)
 
@@ -184,13 +185,14 @@ and `linux/arm64`, tagged `X.Y.Z`, plus `X.Y` and `latest` for a final release
 ~14 MB) and runs as uid 65532; it holds the binary only — nothing secret is
 baked in.
 
-The package is created **private** on the first push: set it to public once in
-the repository's package settings (`Packages` → the package → *Package
-settings* → *Change visibility* → public) and link it to the repository.
-Without that step an anonymous `docker run` fails with
-`denied: requested access to the resource is denied`. Until a release image is
-published, `make docker-build` side-steps the registry entirely:
-`VELRUNA_IMAGE=ghcr.io/nemonobody/velruna:dev make stack-up`.
+For a public repository GHCR inherits the visibility, so an anonymous
+`docker run` works out of the box. If the package did come out private
+(older repositories), flip it once in the repository's package settings
+(`Packages` → the package → *Package settings* → *Change visibility* →
+public) and link it to the repository; otherwise an anonymous `docker run`
+fails with `denied: requested access to the resource is denied`. Until a
+release image is published, `make docker-build` side-steps the registry
+entirely: `VELRUNA_IMAGE=ghcr.io/nemonobody/velruna:dev make stack-up`.
 
 ```bash
 # CLI against a store you already have (config path: --conf, else VELRUNA_CONF)
@@ -198,18 +200,18 @@ docker run --rm -i --user "$(id -u):$(id -g)" \
   -v ~/.velruna.conf:/etc/velruna/velruna.conf:ro \
   -e VELRUNA_CONF=/etc/velruna/velruna.conf \
   -e OPENSEARCH_PASSWORD \
-  ghcr.io/nemonobody/velruna:0.8.9 status
+  ghcr.io/nemonobody/velruna:0.8.10 status
 
 # No config file at all: the connection can come from the environment
 OPENSEARCH_URL=https://os.example:9200 OPENSEARCH_USER=admin docker run --rm -i \
   -e OPENSEARCH_URL -e OPENSEARCH_USER -e OPENSEARCH_PASSWORD \
-  ghcr.io/nemonobody/velruna:0.8.9 status
+  ghcr.io/nemonobody/velruna:0.8.10 status
 
 # MCP over stdio: the client starts the process, so the container is run with -i
 docker run -i --rm --user "$(id -u):$(id -g)" \
   -v ~/.velruna.conf:/etc/velruna/velruna.conf:ro \
   -e VELRUNA_CONF=/etc/velruna/velruna.conf -e OPENSEARCH_PASSWORD \
-  ghcr.io/nemonobody/velruna:0.8.9 mcp
+  ghcr.io/nemonobody/velruna:0.8.10 mcp
 ```
 
 Or bring up OpenSearch and run velruna against it (the Dashboards UI stays
@@ -257,6 +259,11 @@ Config lookup order:
 3. `./velruna.conf` (current directory)
 4. `velruna.conf` next to the binary
 5. `~/.velruna.conf`
+
+`velruna mcp` skips step 3 (a server started by an editor must not pick up
+whatever config the opened project happens to contain): it reads `--conf`,
+then `VELRUNA_CONF`, then the file next to the binary. Pass `--conf` or set
+the variable when the server should use a project-local file.
 
 Create `~/.velruna.conf`:
 
@@ -438,6 +445,10 @@ lists the active ones by name, never by value):
 `VELRUNA_FETCH_OBSCURA_STEALTH`,
 `VELRUNA_LOCAL_REPO_ROOTS`, `VELRUNA_REPO_SCAN_DEPTH`.
 
+The desktop-keyring knobs `VELRUNA_KEYRING_COLLECTION` and
+`VELRUNA_KWALLET_NAME` (§3) are honoured too, but they are read outside the
+config loader, so `velruna status` does not list them.
+
 ## 4. Verify
 
 ```
@@ -499,9 +510,13 @@ sources:
 
   ```bash
   # creds names the entry after the store, not a node: "cluster/<opensearch_cluster>"
-  # (recorded in the config file; point jq at the file your setup uses)
-  curl -k -u admin:"$(secret-tool lookup service velruna username "cluster/$(jq -r .opensearch_cluster "${VELRUNA_CONF:-$HOME/.velruna.conf}")")" \
-       https://127.0.0.1:9200
+  conf="${VELRUNA_CONF:-velruna.conf}"
+  [ -f "$conf" ] || conf="$HOME/.velruna.conf"
+  acct="cluster/$(jq -er .opensearch_cluster "$conf")" || \
+    { echo "no opensearch_cluster in $conf (a legacy entry is the host[:port] account)" >&2; exit 1; }
+  pw="$(secret-tool lookup service velruna username "$acct")" || \
+    pw="$(secret-tool lookup service velruna username 127.0.0.1:9200)"  # legacy host entry
+  curl -k -u "admin:$pw" https://127.0.0.1:9200
   ```
 
 - **Environment**: `read -rs OPENSEARCH_PASSWORD` (prompt, nothing lands in
