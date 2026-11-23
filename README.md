@@ -97,7 +97,7 @@ attribution, not trust.
 ## Reading is selective
 
 A session pays only for what it reads. `velruna_list` and `velruna_search`
-return compact rows — key, summary, category, status, age — and the full value
+return compact rows — key, summary, category, status, source, age — and the full value
 is one `velruna_get` away; a body over `summary_min_len` must ship a summary,
 so a listing stays skimmable; a fetched page is split into blocks — a section too
 long for one block is split, not cut — and read one block at a time. The store
@@ -292,9 +292,11 @@ Key convention: the key names a **stable subject**, not its current value —
 `demo:api:port`, not `demo:api:v1`. Re-using the same key with a new value is a
 correction (over an obsolete fact it resurrects the fact too): the fact points
 at a fresh journal entry (doc-first) and the entry is appended under it;
-re-adding the same value updates notes/source when supplied (plus
-`category`, and `ttl_days`/`keywords` when given) — except an obsolete fact,
-whose re-add resurrects it (journaled, `observed_at` moves).
+re-adding the same value moves `notes` when supplied and records the
+caller's `source` (the edges fill a default — `user:confirmed` on the CLI,
+`tool:mcp` over MCP), plus `category` always and `ttl_days`/`keywords` when
+given — except an obsolete fact, whose re-add resurrects it (journaled,
+`observed_at` moves).
 
 ## MCP server
 
@@ -308,7 +310,7 @@ history unless
 `include_history=true` is passed (that chain is the legacy pre-journal
 in-doc array; journal history is read with `velruna_journal` /
 `velruna_history_info`), and carry `age_days`/`stale`. `velruna_list` is
-compact by default (a table of contents: key/summary/category/status/age — the full
+compact by default (a table of contents: key/summary/category/status/source/age — the full
 value is one `velruna_get` away) and newest-activity-first; cheap partial
 updates (dated note, status flip) go through `velruna_patch` without
 re-sending the value; `velruna_add_batch` packs the session-end ritual into

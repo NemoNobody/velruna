@@ -20,7 +20,7 @@ document keyed by its `key` (the key is the document ID).
 | `observed_at` | date | when the current value was seen (moves only on value change) |
 | `ttl_days` | integer | optional per-fact staleness override, capped by the category TTL |
 | `keywords` | keyword[] | normalized tags: lowercase single tokens, deduped, max 10 |
-| `redactions` | object[] | write-time secret-guard audit: which spans were replaced (field, detector pattern, size) — never the text |
+| `redactions` | object[] (dynamic) | write-time secret-guard audit: which spans were replaced (field, detector pattern, chars) — never the text; not in the explicit catalog, so the mapping is dynamic and `status` does not audit it |
 | `source` | keyword | `tool:read_file \| experiment \| user:confirmed \| doc:*` |
 | `notes` | text | free-text qualifiers (omitted when empty; obsolete reasons appended here) |
 | `summary` | text | short table-of-contents rendering of the value; required when the value is over `summary_min_len` (see below) |
@@ -89,9 +89,10 @@ never stores a partial document. Blocks skipped by the chrome filter are not a
 loss.
 
 `content_hash` is sha256 over the full extracted text **before** the budget is
-applied: it does not depend on `max_chars` or `block_chars`, so the same page
-keeps its identity regardless of how much of it was stored. `full_chars` is the
-length of that full text.
+applied and before the secret-guard hook redacts it: it does not depend on
+`max_chars`, `block_chars` or a redaction, so the same page keeps its identity
+regardless of how much of it was stored. `full_chars` is the post-redaction
+length of that text (it describes what actually ships, like `size`).
 
 When a stored copy was cut by the budget and a larger `max_chars` is requested,
 the text is re-extracted from the stored raw HTML with no network. The guard
@@ -125,10 +126,14 @@ the new value with the stored `source`/`notes` when the request left them
 empty — so the log and the doc never disagree about the qualifiers. The
 entry also repeats the doc's write-once `project` (a correction cannot
 move it) and the canonicalized `category` the write edge applied. `--notes` carries qualifiers ("checked the dev config
-only") to later sessions. An empty `--source` or `--notes` means "not given",
-never "erase": neither overwrites a stored value (the Patch contract) — on
-the touch path the qualifiers are not kept in history, so such a wipe would be
-irreversible. A value over `summary_min_len` requires `--summary`
+only") to later sessions. An empty `--source` or `--notes` at the client API
+means "not given", never "erase": neither overwrites a stored value (the
+Patch contract) — on the touch path the qualifiers are not kept in history,
+so such a wipe would be irreversible. The CLI fills `--source` with
+`user:confirmed` (and the MCP add edge with `tool:mcp`) when none is given,
+so a same-value touch records that label — pass an explicit value (or run
+the client API with an empty one) to keep the stored provenance. A value over
+`summary_min_len` requires `--summary`
 (the store's table of contents, see below).
 
 ### get
@@ -688,16 +693,17 @@ Guarantees and limits:
   shapes in the agent-visible fields (title, section text/headings, image
   alt/title) and in the stored raw HTML are REDACTED in place (`[velruna-
   redacted:pattern]`) and the page is stored — the answer lists `redactions`
-  (field/pattern/size, never a preview). Medium findings in the agent-visible
+  (field/pattern/chars, never a preview). Medium findings in the agent-visible
   text: on the DOCUMENTATION route they do not refuse the write (documentation
   is full of asset hashes, quoted SHAs and config names — refusing made pages
   unusable); they are counted and surfaced (`guard: N` in the CLI outline,
   `guard_medium_ignored: N` in the MCP answer) so the leniency is visible, not
   silent. On the API route medium findings still REFUSE the write (an API body
   quoting a token is a real leak class): at `ask` a finding can be confirmed,
-  at `reject` there is no bypass. Redaction runs before the stored `size` and
-  `content_hash` are computed, so the metadata describes exactly the text
-  that ships. Every redacted field (agent-visible text and the stored raw
+  at `reject` there is no bypass. Redaction runs before the stored `size`
+  and `full_chars` are measured, so both describe exactly the text that
+  ships; `content_hash` is computed over the pre-redaction extracted text,
+  so a redaction never changes the page's identity. Every redacted field (agent-visible text and the stored raw
   HTML) is redacted in a high-confidence pass applied twice: the second pass
   closes the common overlap-tail case (a span starting inside an earlier
   replacement); a greedy span can still swallow a scheme prefix, so a
@@ -719,8 +725,9 @@ Guarantees and limits:
   stays strict on every content route: labels are short identity text where
   a credential has no business appearing;
   a SHA-named project refuses its own fetch — keep labels human-readable.
-  The `redactions` field is dynamically mapped, not filtered — the docs
-  index is small and the audit trail is worth the mapping.
+  The `redactions` field is dynamically mapped on the facts and docs indices
+  (it is not in the explicit catalog, so `velruna status`'s schema check does
+  not audit it) — the audit trail is worth the mapping.
 - Deliberate tradeoff: a high-confidence secret on a fetched page ends up
   stored in redacted form — the redaction must therefore out-cover a reject.
   For the shared plaintext docs store this is the accepted product decision:

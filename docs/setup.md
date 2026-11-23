@@ -69,7 +69,7 @@ For a dev node, `velruna.conf` uses dummy credentials with plaintext allowed
 
 Containers love to lose data: before `make dev-opensearch-down` take a
 snapshot. The compose stack mounts `/snapshots` at `docker/os-snapshots/`
-(`OPENSEARCH_PATH_REPO`), but the `velruna-fs` repository still has to be
+(the `path.repo` node setting), but the `velruna-fs` repository still has to be
 registered on that location once — see [backup.md](backup.md) §5.
 
 ### Dashboards (optional UI)
@@ -262,8 +262,9 @@ Config lookup order:
 
 `velruna mcp` skips step 3 (a server started by an editor must not pick up
 whatever config the opened project happens to contain): it reads `--conf`,
-then `VELRUNA_CONF`, then the file next to the binary. Pass `--conf` or set
-the variable when the server should use a project-local file.
+then `VELRUNA_CONF`, then the file next to the binary, then `~/.velruna.conf`.
+Pass `--conf` or set the variable when the server should use a project-local
+file.
 
 Create `~/.velruna.conf`:
 
@@ -335,7 +336,7 @@ in front:
   | KDE Plasma with no Secret Service provider on the bus | KWallet-native (`org.kde.kwalletd6`) | used when the name has no owner: wallet `kdewallet`, folder = service, key = account |
   | XFCE / LXQt / MATE / Cinnamon / tiling WMs | whatever Secret Service is installed (usually gnome-keyring) | works if the daemon runs and the keyring is unlocked |
   | KeePassXC (Secret Service integration) | KeePassXC | entries are namespaced by service + username, same as everywhere |
-  | headless / container / ssh | none | no bus, no keyring: export `OPENSEARCH_PASSWORD`; `velruna status` reports `password_from: env` and the keyring error |
+  | headless / container / ssh | none | no bus, no keyring: export `OPENSEARCH_PASSWORD`; `velruna status` reports `password: env` and the keyring error |
   | Windows | Windows Credential Manager (zalando/go-keyring) | exercised by the `windows` CI job, but its locked-store and dismissed-prompt policy is unexplored: for a reproducible setup use `OPENSEARCH_PASSWORD` or a config file only the user can read |
 
   A renamed KDE wallet is addressed by label on the Secret Service path:
@@ -384,9 +385,10 @@ in front:
   could never assign — permanent yellow), two or more data nodes get `1`, so
   losing one node loses neither facts nor journal history. Set an explicit
   `0`–`N` to override. The count is not frozen at creation: each client start
-  re-checks the existing facts/docs indices and the journal template against
-  the current topology and corrects drift — an install that grows from one
-  node into a cluster self-heals. In auto mode nothing is changed while the
+  re-checks the existing facts/docs/journal indices against the current
+  topology and corrects drift (the journal template is re-aligned on the first
+  journal append of a process) — an install that grows from one node into a
+  cluster self-heals. In auto mode nothing is changed while the
   health probe fails (an unknown topology is never "fixed" toward 0). The
   realignment is uniform across history periods — per-period cold-tiering
   (replicas=0 on old periods) is not a supported layout; if you want the
@@ -455,7 +457,8 @@ config loader, so `velruna status` does not list them.
 velruna status
 ```
 
-Expected output:
+Expected output (abridged — a real run also prints the binary banner line,
+`docs:`, `replicas:`, `indices:` and the storage note):
 
 ```
 config file: /home/you/.velruna.conf
@@ -624,9 +627,11 @@ Then set `opensearch_user: "velruna"` in the config and run `velruna creds set`
 - The journal template stamps `index.number_of_replicas: 0` on a single-node
   cluster: journal indices stay green (replicas would hang unassigned — the
   classic single-node trap). On a multi-node store the app raises it to `1`
-  automatically, and it re-aligns both the template and existing indices at
-  every client start — so hand-edits to the stamped replica count do not
-  survive; pin the count with `index_replicas` in the velruna config instead.
+  automatically; existing journal indices are re-aligned at every client start,
+  and the template itself on the first journal append of a process (a
+  read-only run never touches it) — so hand-edits to the stamped replica count
+  do not survive; pin the count with `index_replicas` in the velruna config
+  instead.
 
 ### Shared store: several users, project separation
 

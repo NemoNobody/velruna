@@ -85,8 +85,10 @@ skip unless the flag is set.
 ## Not yet covered (known gaps)
 
 - **secure profile** (`make dev-opensearch-secure`, https + demo certs) —
-  exercised: the CLI smoke runs against it over https (dev nodes on 9299
-  plain and 9443 secure); CI does not start it yet.
+  exercised by the dispatch-only smoke workflow: the secured stack boots, the
+  Dashboards endpoint answers 401 without credentials, and a `dashboards push`
+  succeeds. The CLI smoke suite runs only against the plain dev node, and
+  CI-on-push starts neither.
 - **Windows Credential Manager policy** (locked store, dismissed prompt) — the
   `windows` CI job does create/read/delete on every push, but these paths are
   unexplored.
