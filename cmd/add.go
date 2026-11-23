@@ -119,7 +119,10 @@ func AddCmd() *cobra.Command {
 					b.WriteString("note: the --summary value was ignored on a same-value touch (correct the value to change its summary)\n")
 				}
 			}
-			b.WriteString(redactionLines(redactions))
+			// Print what the store actually holds for THIS write: on a same-value
+			// touch the guard's value/summary rows never landed, and echoing them
+			// would claim a shortening that did not happen (round-23 finding).
+			b.WriteString(redactionLines(res.Redactions))
 			if _, err := io.WriteString(os.Stdout, b.String()); err != nil {
 				fatalErr(err)
 			}

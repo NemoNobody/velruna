@@ -50,7 +50,7 @@ staleness in context. The store never decides.
 | `velruna_keys [prefix] [match]` | key navigation: prefix and/or substring, across projects (search does **not** match keys) |
 | `velruna_search <query>` | search in `value`, `notes` and `summary` (not in keys) |
 | `velruna_get <key>` | exact key (`found=false` when absent) |
-| `velruna_add <key> <value> [category] [project] [source] [notes]` | upsert (categories: location, config, endpoint, behavior, context_map, recipe, rule — unknown ones are rejected); long values require a `summary` (see below) |
+| `velruna_add <key> <value> <category> [project] [source] [notes]` | upsert (categories: location, config, endpoint, behavior, context_map, recipe, rule — unknown ones are rejected); long values require a `summary` (see below) |
 | `velruna_add_batch` | 1..10 facts in one call (session-end ritual); per-item guard, partial success |
 | `velruna_patch` | partial update of an existing fact: `notes_append`, status flip (`verified`\|`obsolete`), value/source — omitted fields untouched |
 | `velruna_patch_batch` | 1..10 patches in one call (session-end ritual); per-item guard, partial success; never creates |

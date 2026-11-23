@@ -27,8 +27,8 @@ func JournalCmd() *cobra.Command {
 		Long: `Read journal entries for a key, newest first.
 
 The journal is the history: every accepted value for the key is one entry
-(op=write; op=rediscovery records a re-confirmation of the same value,
-written by velruna_patch reverify; op=retire marks a verified→obsolete
+(op=write; op=rediscovery records a re-confirmation of the same value —
+written by the MCP tool velruna_patch with reverify; op=retire marks a verified→obsolete
 transition; op=supersede records a superseded_by link to the fact that
 replaced this one — a relation, not a value change). Counts after an admin
 deleted old journal indices are lower bounds — the surviving journal, not

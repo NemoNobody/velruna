@@ -263,8 +263,10 @@ the fact doc:
   entries with the **server clock** — writer clocks skew on a shared store;
   index template `<index>-journal` with explicit mappings) is created
   automatically on the first accepted write.
-- Write order is **doc-first**: the journal entry id is preallocated into
-  `current_ref`, the fact doc is updated, then the entry is indexed. A lost
+- Write order is **doc-first**: the fact doc is always written before its
+  journal entry. On a correction the entry id is preallocated into
+  `current_ref`, the fact doc is updated, then the entry is indexed; a birth
+  creates the doc first, then appends the entry and links it. A lost
   entry append leaves `current_ref` dangling — `migrate-history` re-appends
   the current state only for facts that never got a link (legacy facts and
   birth-path writes whose append or link failed); scripted writes preallocate a
@@ -550,7 +552,7 @@ referrer's edge no longer blocks, and a self-link resolves itself on
 retirement). The check is advisory like every check-then-write (a link
 landing after the probe can still dangle), and data can predate the guard,
 so `velruna links check` (CLI, bounded by `--limit`) audits the whole graph
-with one scan plus one batched round of target probes: `dangling` (target gone), `unverified` (target not verified),
+with one bounded scan plus a batched probe round: `dangling` (target gone), `unverified` (target not verified),
 `cycle` (the edge loops). Exit codes: 0 when the audit found nothing
 broken (the summary says when the graph was not fully audited), 1 findings,
 2 the check could

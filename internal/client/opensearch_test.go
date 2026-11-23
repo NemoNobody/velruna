@@ -717,6 +717,50 @@ func TestAddSummaryIgnoredFlag(t *testing.T) {
 	}
 }
 
+// TestAddTouchReportsOnlyStoredRedactions: a same-value touch writes no value
+// and no summary, so guard rows cut from those INPUT fields never landed —
+// the answer must carry only what this write stored (round-23: the edges
+// echoed every input row, claiming a shortening that did not happen).
+func TestAddTouchReportsOnlyStoredRedactions(t *testing.T) {
+	liveSrc := `{"fact_id":"fid","key":"k","value":"v","category":"config","project":"proj","status":"verified","created_at":"2020-01-01T00:00:00Z","updated_at":"2020-01-01T00:00:00Z","observed_at":"2020-01-01T00:00:00Z"}`
+	routes := func(r recordedRequest) (int, string) {
+		if code, body := journalRoutesOK(r); code != 500 {
+			return code, body
+		}
+		switch {
+		case r.Method == "GET":
+			return 200, `{"_index":"velruna","_id":"k","found":true,"_source":` + liveSrc + `}`
+		case r.Method == "POST" && strings.Contains(r.Path, "_update"):
+			return 200, `{"result":"updated"}`
+		}
+		return 500, `{"status":500,"error":"unexpected ` + r.Method + " " + r.Path + `"}`
+	}
+	c, _ := newFakeClient(t, routes)
+	f := model.NewFact("k", "v", "config", "proj", "", "")
+	f.Redactions = []model.Redaction{{Field: "value", Pattern: "long-hex", Chars: 40}}
+	res, err := c.Add(context.Background(), f)
+	if err != nil {
+		t.Fatalf("Add (touch, value rows only): %v", err)
+	}
+	if len(res.Redactions) != 0 {
+		t.Errorf("res.Redactions = %+v, want none: the value was not written", res.Redactions)
+	}
+	// The note IS rewritten on a touch: its row lands and is reported.
+	c2, _ := newFakeClient(t, routes)
+	f2 := model.NewFact("k", "v", "config", "proj", "", "note [velruna-redacted:long-base64]")
+	f2.Redactions = []model.Redaction{
+		{Field: "value", Pattern: "long-hex", Chars: 40},
+		{Field: "notes", Pattern: "long-base64", Chars: 44},
+	}
+	res2, err := c2.Add(context.Background(), f2)
+	if err != nil {
+		t.Fatalf("Add (touch with a redacted note): %v", err)
+	}
+	if len(res2.Redactions) != 1 || res2.Redactions[0].Field != "notes" {
+		t.Errorf("res.Redactions = %+v, want exactly the notes row", res2.Redactions)
+	}
+}
+
 // TestObsoleteMergesReasonRedactions pins the audit contract on the retire
 // path: rows cut from the reason land on the fact next to the CURRENT value's
 // rows (a retirement does not rewrite the value), a row of the same field is

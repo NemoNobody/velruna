@@ -20,6 +20,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -106,21 +107,36 @@ func TestNoRetiredPhrases(t *testing.T) {
 func TestReadmeCommandTableMatchesCobra(t *testing.T) {
 	root := cmd.NewRootCmd()
 	subtreeFlags := map[string]map[string]bool{}
+	subtreeShorts := map[string]map[string]bool{}
 	childNames := map[string]map[string]bool{}
 	var walk func(c *cobra.Command, path string)
 	walk = func(c *cobra.Command, path string) {
 		flags := map[string]bool{}
+		shorts := map[string]bool{}
 		kids := map[string]bool{}
 		for _, add := range []*pflag.FlagSet{c.Flags(), c.PersistentFlags(), c.InheritedFlags()} {
-			add.VisitAll(func(fl *pflag.Flag) { flags[fl.Name] = true })
+			add.VisitAll(func(fl *pflag.Flag) {
+				flags[fl.Name] = true
+				if fl.Shorthand != "" {
+					shorts[fl.Shorthand] = true
+				}
+			})
 		}
 		seen := subtreeFlags[path]
 		if seen == nil {
 			seen = map[string]bool{}
 			subtreeFlags[path] = seen
 		}
+		seenShort := subtreeShorts[path]
+		if seenShort == nil {
+			seenShort = map[string]bool{}
+			subtreeShorts[path] = seenShort
+		}
 		for k := range flags {
 			seen[k] = true
+		}
+		for k := range shorts {
+			seenShort[k] = true
 		}
 		for _, child := range c.Commands() {
 			kids[child.Name()] = true
@@ -132,6 +148,9 @@ func TestReadmeCommandTableMatchesCobra(t *testing.T) {
 			for k := range subtreeFlags[childPath] {
 				seen[k] = true
 			}
+			for k := range subtreeShorts[childPath] {
+				seenShort[k] = true
+			}
 		}
 		childNames[path] = kids
 	}
@@ -139,6 +158,7 @@ func TestReadmeCommandTableMatchesCobra(t *testing.T) {
 
 	line := regexp.MustCompile("^\\|\\s*`velruna ([a-z-]+)([^`]*)")
 	flag := regexp.MustCompile(`--([a-z][a-z-]*)`)
+	short := regexp.MustCompile(`(?:^|[\s\[(])-([A-Za-z])(?:[\s\])]|$)`)
 	subcmd := regexp.MustCompile(`^[a-z][a-z-]*$`)
 	seenCmd := map[string]bool{}
 	for _, l := range strings.Split(readFile(t, "README.md"), "\n") {
@@ -178,6 +198,13 @@ func TestReadmeCommandTableMatchesCobra(t *testing.T) {
 		for _, fm := range flag.FindAllStringSubmatch(l, -1) {
 			if !flags[fm[1]] {
 				t.Errorf("README table: --%s listed for %q but not registered in its subtree", fm[1], name)
+			}
+		}
+		// Shorthands are validated on the command cell only (the description
+		// column's prose is full of hyphens; the cell is where flags live).
+		for _, sm := range short.FindAllStringSubmatch(cell, -1) {
+			if !subtreeShorts[name][sm[1]] {
+				t.Errorf("README table: -%s listed for %q but no registered flag in its subtree has that shorthand", sm[1], name)
 			}
 		}
 	}
@@ -288,6 +315,101 @@ func codeEnvNames(t *testing.T) map[string]bool {
 		t.Fatal("code env scan parsed zero os.Getenv/LookupEnv calls — the scan itself broke")
 	}
 	return names
+}
+
+// goFilesUnder returns the non-test .go files under dir (sorted).
+func goFilesUnder(t *testing.T, dir string) []string {
+	t.Helper()
+	var out []string
+	err := filepath.WalkDir(dir, func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if !d.IsDir() && strings.HasSuffix(d.Name(), ".go") && !strings.HasSuffix(d.Name(), "_test.go") {
+			out = append(out, p)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("walk %s: %v", dir, err)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// proseAfterVelruna: English words that legitimately follow the project name
+// in prose ("velruna assumes..."), not command references. Adding a word here
+// is a conscious decision, like the retired-phrase map — if the test fires on
+// a real hint, the hint is wrong, not the guard.
+var proseAfterVelruna = map[string]bool{
+	"assumes": true, "before": true, "bug": true, "could": true,
+	"does": true, "index": true, "indices": true, "keeps": true,
+	"only": true, "processes": true, "serves": true,
+}
+
+// nonToolTokens: velruna_-prefixed identifiers that are stored field/key
+// names, not MCP tool references.
+var nonToolTokens = map[string]string{
+	"velruna_schema": "mappings._meta.velruna_schema, the stored schema version key",
+}
+
+// TestHintReferencesExist: user-facing strings in cmd/ and internal/ name CLI
+// commands (`velruna <cmd>`) and MCP tools (`velruna_<tool>`) — every such name
+// must exist. Round 22 lost a round to a hint that told users to run `velruna
+// patch`, which the CLI has never had; comments may discuss anything, so only
+// string literals are scanned.
+func TestHintReferencesExist(t *testing.T) {
+	cliCmds := map[string]bool{}
+	for _, c := range cmd.NewRootCmd().Commands() {
+		cliCmds[c.Name()] = true
+	}
+	tools := map[string]bool{}
+	mcpName := regexp.MustCompile(`Name:\s*"(velruna_[a-z_]+)"`)
+	for _, path := range goFilesUnder(t, "cmd") {
+		for _, m := range mcpName.FindAllStringSubmatch(readFile(t, path), -1) {
+			tools[m[1]] = true
+		}
+	}
+	if len(tools) == 0 {
+		t.Fatal("no MCP tool registrations parsed — the registration format changed and this check went blind")
+	}
+	cliRef := regexp.MustCompile(`\bvelruna ([a-z][a-z-]*)`)
+	toolRef := regexp.MustCompile(`\bvelruna_[a-z][a-z_]*`)
+	files := append(goFilesUnder(t, "cmd"), goFilesUnder(t, "internal")...)
+	for _, path := range files {
+		fset := token.NewFileSet()
+		f, err := parser.ParseFile(fset, path, nil, 0)
+		if err != nil {
+			t.Fatalf("parse %s: %v", path, err)
+		}
+		ast.Inspect(f, func(n ast.Node) bool {
+			lit, ok := n.(*ast.BasicLit)
+			if !ok || lit.Kind != token.STRING {
+				return true
+			}
+			s, err := strconv.Unquote(lit.Value)
+			if err != nil {
+				return true
+			}
+			for _, m := range cliRef.FindAllStringSubmatch(s, -1) {
+				if proseAfterVelruna[m[1]] {
+					continue
+				}
+				if !cliCmds[m[1]] {
+					t.Errorf("%s: string names `velruna %s`, not a registered command", path, m[1])
+				}
+			}
+			for _, name := range toolRef.FindAllString(s, -1) {
+				if nonToolTokens[name] != "" {
+					continue
+				}
+				if !tools[name] {
+					t.Errorf("%s: string names %s, not a registered MCP tool", path, name)
+				}
+			}
+			return true
+		})
+	}
 }
 
 // TestEnvListsMatchTheLoader: the env-var lists in README and setup.md must

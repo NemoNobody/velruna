@@ -163,9 +163,10 @@ func newFactViews(facts []model.Fact, includeHistory, compact bool) []factView {
 type factsOutput struct {
 	Count int        `json:"count" jsonschema:"number of facts returned"`
 	Facts []factView `json:"facts" jsonschema:"matching facts (order: search = relevance; list = sort parameter, updated by default; keys = by key)"`
-	// Hint is navigation advice for the zero-hit case: an agent that gets a
-	// bare 0 starts guessing; a pointer to the right tool ends the loop.
-	Hint string `json:"hint,omitempty" jsonschema:"present when count=0: which tool/shape to try next"`
+	// Hint is navigation advice: an agent that gets a bare 0 starts guessing,
+	// and a compact search answer with hits feeds the same loop by pointing at
+	// velruna_get. A pointer to the right tool ends both.
+	Hint string `json:"hint,omitempty" jsonschema:"a navigation hint: always present on a zero-hit answer; a compact search answer with hits also carries one"`
 	// Truncated is the honest page signal: the store matched more than the
 	// page delivered. For list/keys the page is the navigation cap (1000),
 	// for search it is the requested limit — the advice differs, and an

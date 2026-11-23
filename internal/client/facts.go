@@ -74,6 +74,11 @@ type AddResult struct {
 	// resurrection reports Changed=true, so callers cannot derive this
 	// from the flags alone.
 	SummaryIgnored bool
+	// Redactions: the secret-guard audit rows THIS write stored (nil when it
+	// cut nothing). A touch stores only the notes rows — the value and the
+	// summary it never wrote must not be reported as shortened, so the
+	// answer cannot just echo the guard's input rows.
+	Redactions []model.Redaction
 }
 
 // redactionsForFields keeps the audit rows of the fields this write stores. A
@@ -190,12 +195,12 @@ func (c *Client) Add(ctx context.Context, f *model.Fact) (AddResult, error) {
 			}
 			ref := journalEntryID(f.Key, model.OpWrite, f.Value, f.Notes, f.Source, ts)
 			if _, jErr := c.appendJournalID(ctx, c.newJournalEntryFor(ctx, f, f.FactID, ts), ref, "", true); jErr != nil {
-				return AddResult{Created: true, Changed: true}, fmt.Errorf("add: the fact doc was stored, the journal entry lagged: %w", jErr)
+				return AddResult{Created: true, Changed: true, Redactions: f.Redactions}, fmt.Errorf("add: the fact doc was stored, the journal entry lagged: %w", jErr)
 			}
 			if lErr := c.linkCurrentRef(ctx, f.Key, ref, birthSeq, birthTerm); lErr != nil {
-				return AddResult{Created: true, Changed: true}, fmt.Errorf("add: the fact and its birth journal entry were stored, the link to the journal failed (migrate-history repairs the link): %w", lErr)
+				return AddResult{Created: true, Changed: true, Redactions: f.Redactions}, fmt.Errorf("add: the fact and its birth journal entry were stored, the link to the journal failed (migrate-history repairs the link): %w", lErr)
 			}
-			return AddResult{Created: true, Changed: true}, nil
+			return AddResult{Created: true, Changed: true, Redactions: f.Redactions}, nil
 		}
 		// op_type=create lost the race to a concurrent Add of the same key
 		// (a plain index would last-write-win and drop the winner's value
@@ -345,14 +350,14 @@ func (c *Client) Add(ctx context.Context, f *model.Fact) (AddResult, error) {
 				if f.Summary != "" {
 					dropHint = "; the passed summary was ignored (the stored value was unchanged)"
 				}
-				return AddResult{Changed: true, Resurrected: true, SummaryIgnored: f.Summary != ""}, fmt.Errorf("add: resurrection accepted, the journal entry lagged: %w%s", jErr, dropHint)
+				return AddResult{Changed: true, Resurrected: true, SummaryIgnored: f.Summary != "", Redactions: touchRows}, fmt.Errorf("add: resurrection accepted, the journal entry lagged: %w%s", jErr, dropHint)
 			}
 		}
 		// Same value: notes/source moved, observed_at must not (the
 		// observation is old), the journal is untouched — the resurrection
 		// exception above is the one same-value write that IS a new
 		// observation, and it reports Changed=true and Resurrected=true.
-		return AddResult{Changed: resurrect, Resurrected: resurrect, SummaryIgnored: f.Summary != ""}, nil
+		return AddResult{Changed: resurrect, Resurrected: resurrect, SummaryIgnored: f.Summary != "", Redactions: touchRows}, nil
 	}
 
 	if err := c.checkSummaryRequired(f); err != nil {
@@ -453,14 +458,14 @@ func (c *Client) Add(ctx context.Context, f *model.Fact) (AddResult, error) {
 		if existing.Status == "obsolete" {
 			msg = "correction accepted (resurrecting an obsolete fact)"
 		}
-		return AddResult{Changed: true, PreviousSummary: existing.Summary, Resurrected: existing.Status == "obsolete"}, fmt.Errorf("add: %s, the journal entry lagged: %w", msg, jErr)
+		return AddResult{Changed: true, PreviousSummary: existing.Summary, Resurrected: existing.Status == "obsolete", Redactions: f.Redactions}, fmt.Errorf("add: %s, the journal entry lagged: %w", msg, jErr)
 	}
 	// The value was accepted as a new version (journal entry + correction):
 	// changed=true, and the summary the correction is replacing is reported
 	// so the caller can name the superseded version without reading the
 	// journal. A correction over an obsolete fact also resurrects it (the
 	// script writes status=verified): the transition is named explicitly.
-	return AddResult{Changed: true, PreviousSummary: existing.Summary, Resurrected: existing.Status == "obsolete"}, nil
+	return AddResult{Changed: true, PreviousSummary: existing.Summary, Resurrected: existing.Status == "obsolete", Redactions: f.Redactions}, nil
 }
 
 // newJournalEntryFor builds — without writing — the entry for a state the

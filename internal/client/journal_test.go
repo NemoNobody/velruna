@@ -703,9 +703,20 @@ func TestResurrectAppendCollisionIsNotSuccess(t *testing.T) {
 		}
 		return http.StatusInternalServerError, `{"status":500,"error":"unexpected ` + r.Method + " " + r.Path + `"}`
 	})
-	res, err := c.Add(context.Background(), model.NewFact("k", "v", "config", "p", "s", ""))
+	// A summary rides along: the same-value resurrect drops it, and on this
+	// path the error text is the only surface that reaches the caller (the
+	// typed answer is discarded at the MCP error edge) — pin the hint.
+	f := model.NewFact("k", "v", "config", "p", "s", "")
+	f.Summary = "a toc the same-value resurrect must drop"
+	res, err := c.Add(context.Background(), f)
 	if err == nil || !strings.Contains(err.Error(), "resurrection accepted") || !strings.Contains(err.Error(), "journal append") {
 		t.Fatalf("resurrect over a 409 uuid append must report the lagged entry, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "passed summary was ignored") {
+		t.Errorf("the lagged-resurrect error must name the dropped summary, got: %v", err)
+	}
+	if !res.SummaryIgnored {
+		t.Errorf("res.SummaryIgnored = false, want true on a lagged same-value resurrect")
 	}
 	if !res.Changed {
 		t.Errorf("res.Changed = false, want true (the resurrect itself landed): %v", err)

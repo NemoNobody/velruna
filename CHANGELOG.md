@@ -87,6 +87,11 @@ notes).
   `docker/os-snapshots` is a real snapshot location; the docs' backup recipe
   registers `velruna-fs` on it instead of pointing at a location the node
   never declared.
+- `add` on a same-value touch no longer reports redactions for fields it
+  did not write: the guard's rows for the input value/summary were echoed as
+  if they had been stored. The answer now carries exactly the rows this
+  write stored (the notes rows, on a touch); the value rows already on the
+  fact are untouched and are not re-announced.
 - re-adding an obsolete fact with the same value (a resurrection) no longer
   silently drops a passed summary: the CLI and `velruna_add` say the summary
   was ignored, same as on a plain same-value touch (a resurrection reports

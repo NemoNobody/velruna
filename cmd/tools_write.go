@@ -163,12 +163,12 @@ func (s *mcpServer) addOne(ctx context.Context, cfg *config.Config, c *client.Cl
 		// item.Error's wording, not by a flag). Do not "simplify"
 		// this away: the batch answer would silently zero what did store.
 		if res.Created || res.Changed {
-			return addOutput{Key: in.Key, Created: res.Created, Changed: res.Changed, Status: f.Status, Redactions: redactions}, writeFailure("velruna_add", err)
+			return addOutput{Key: in.Key, Created: res.Created, Changed: res.Changed, Status: f.Status, Redactions: res.Redactions}, writeFailure("velruna_add", err)
 		}
 		return addOutput{}, writeFailure("velruna_add", err)
 	}
 	out := addOutput{Key: in.Key, Created: res.Created, Changed: res.Changed,
-		Status: f.Status, PreviousSummary: res.PreviousSummary, Redactions: redactions}
+		Status: f.Status, PreviousSummary: res.PreviousSummary, Redactions: res.Redactions}
 	if !res.Created && !res.Changed {
 		out.Note = "same-value touch: observed_at and the journal untouched, the fact keeps aging (re-verify when stale); notes move when supplied and the caller's source is recorded, category always, ttl_days/keywords when given"
 		if in.Summary != "" {

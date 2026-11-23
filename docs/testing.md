@@ -21,7 +21,9 @@ what was run live against real clusters.
   where the historical bugs lived (read-after-write, read-only stores).
 - **Doc/code drift guards** — `docsync_test.go` (root package) pins the
   surfaces that review rounds kept re-finding stale: the README command/flag
-  table against the cobra tree (subcommand alternatives included), env-var
+  table against the cobra tree (subcommand alternatives and short flags
+  included), CLI command and MCP tool names mentioned inside user-facing
+  strings against the real trees, env-var
   lists in README/setup.md against what our Go code (config, cmd, internal)
   and `docker/opensearch.yml` actually consume, ghcr image
   pins agreeing everywhere, compose profiles all named in setup.md, and a
