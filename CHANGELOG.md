@@ -8,6 +8,8 @@ notes).
 
 ## Unreleased
 
+## v0.9.0 — 2026-11-23
+
 ### Added
 
 - `velruna links check`: one bounded scan plus a batched probe round (`--limit`, default 1000 edges) walks
