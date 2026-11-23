@@ -337,8 +337,15 @@ func (c *Client) Add(ctx context.Context, f *model.Fact) (AddResult, error) {
 		if entry != nil {
 			if _, jErr := c.appendJournalID(ctx, entry, ref, "", false); jErr != nil {
 				// The resurrect itself landed (the doc is verified again): the
-				// answer must say so even though the journal entry lagged.
-				return AddResult{Changed: true, Resurrected: true, SummaryIgnored: f.Summary != ""}, fmt.Errorf("add: resurrection accepted, the journal entry lagged: %w", jErr)
+				// answer must say so even though the journal entry lagged. The
+				// error text travels to every edge (CLI fatalErr, batch
+				// item.Error), so it also carries the summary-drop hint the
+				// structured note cannot reach on this path.
+				dropHint := ""
+				if f.Summary != "" {
+					dropHint = "; the passed summary was ignored (the stored value was unchanged)"
+				}
+				return AddResult{Changed: true, Resurrected: true, SummaryIgnored: f.Summary != ""}, fmt.Errorf("add: resurrection accepted, the journal entry lagged: %w%s", jErr, dropHint)
 			}
 		}
 		// Same value: notes/source moved, observed_at must not (the

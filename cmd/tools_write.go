@@ -155,9 +155,10 @@ func (s *mcpServer) addOne(ctx context.Context, cfg *config.Config, c *client.Cl
 		// failed): Add reports what landed in res. The single velruna_add edge
 		// cannot surface the flags — go-sdk discards the typed output when the
 		// handler returns an error, so the honest state travels in the error
-		// text — but velruna_add_batch copies these flags into its per-item
+		// text (a lagged resurrect names the summary drop there too) — but
+		// velruna_add_batch copies the flags and the note into its per-item
 		// output next to item.Error, where they are visible (the per-item
-		// flags are Created/Changed only: on a lagged resurrect or a
+		// flags are Created/Changed: on a lagged resurrect or a
 		// correction over an obsolete fact, the transition is named by
 		// item.Error's wording, not by a flag). Do not "simplify"
 		// this away: the batch answer would silently zero what did store.
@@ -174,14 +175,14 @@ func (s *mcpServer) addOne(ctx context.Context, cfg *config.Config, c *client.Cl
 			// A passed summary would rewrite the CURRENT value's table of
 			// contents without a new version — silently misleading in a
 			// shared store. It is dropped; say so instead of hiding it.
-			out.Note += "; the passed summary was ignored on a same-value touch (correct the value to change its summary)"
+			out.Note += "; the passed summary was ignored on a same-value touch (velruna_patch changes a summary without a new version)"
 		}
 	} else if res.Resurrected {
 		out.Note = "resurrected: the fact was obsolete; status is back to verified, observed_at moved, and the event is journaled"
 		if res.SummaryIgnored {
 			// A same-value resurrection still drops the passed summary (no new
 			// version landed); without this hint the drop is silent.
-			out.Note += "; the passed summary was ignored (the stored value was unchanged; correct the value to change its summary)"
+			out.Note += "; the passed summary was ignored (the stored value was unchanged; velruna_patch changes a summary without a new version)"
 		}
 	}
 	return out, nil
@@ -197,7 +198,7 @@ type addBatchOutput struct {
 	Count int `json:"count" jsonschema:"number of items processed"`
 	// Summary counters: the whole-session ritual without re-reading items.
 	Created int            `json:"created" jsonschema:"items newly created"`
-	Changed int            `json:"changed" jsonschema:"items that accepted a new version (includes created)"`
+	Changed int            `json:"changed" jsonschema:"items that accepted a journaled event: new version or resurrection (includes created)"`
 	Touched int            `json:"touched" jsonschema:"items touched on the same value (no new version)"`
 	Items   []addBatchItem `json:"items" jsonschema:"per-item outcome in request order; a failed item does not roll back the others"`
 }
@@ -207,6 +208,10 @@ type addBatchItem struct {
 	Created bool   `json:"created" jsonschema:"see velruna_add"`
 	Changed bool   `json:"changed" jsonschema:"see velruna_add"`
 	Status  string `json:"status,omitempty" jsonschema:"status of the stored fact"`
+	// Note carries velruna_add's same-value/resurrect/summary-ignored note:
+	// a batch caller must see the same honesty the singular edge shows, or a
+	// changed=true resurrection would imply the summary landed.
+	Note string `json:"note,omitempty" jsonschema:"same-value/resurrect/summary note (see velruna_add)"`
 	// Error carries the item's rejection (guard hit, validation, store
 	// failure). Partial success is legal: OpenSearch writes are per-doc, and
 	// a batch transaction would be a fiction.
@@ -248,7 +253,7 @@ func (s *mcpServer) addBatch(ctx context.Context, req *mcp.CallToolRequest, in a
 		res, err := s.addOne(ctx, cfg, c, cErr, it)
 		// The echo carries the TRIMMED key: it is what the store holds, and a
 		// caller reconciling answers against the store must not miss on " k ".
-		item := addBatchItem{Key: strings.TrimSpace(it.Key), Created: res.Created, Changed: res.Changed, Status: res.Status, Redactions: res.Redactions}
+		item := addBatchItem{Key: strings.TrimSpace(it.Key), Created: res.Created, Changed: res.Changed, Status: res.Status, Note: res.Note, Redactions: res.Redactions}
 		if err != nil {
 			// Label the item, not the single-add tool: an agent reading a
 			// batch answer must not conclude velruna_add itself broke. Strip

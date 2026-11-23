@@ -107,11 +107,16 @@ func AddCmd() *cobra.Command {
 			b.WriteString(strconv.Quote(project))
 			b.WriteString("\n")
 			if res.SummaryIgnored {
-				// Same contract as the MCP touch note: the passed summary is
-				// dropped on a same-value write (it would rewrite the current
-				// value's table of contents without a new version) — including
-				// a same-value resurrection, which reports Changed=true. Say so.
-				b.WriteString("note: the --summary value was ignored on a same-value touch (correct the value to change its summary)\n")
+				// Same contract as the MCP note: the passed summary is dropped on
+				// a same-value write (it would rewrite the current value's table
+				// of contents without a new version) — including a same-value
+				// resurrection, which reports Changed=true. Say so; patch is the
+				// way to move a summary alone.
+				if res.Resurrected {
+					b.WriteString("note: the --summary value was ignored (the stored value was unchanged; velruna patch can change a summary without a new version)\n")
+				} else {
+					b.WriteString("note: the --summary value was ignored on a same-value touch (velruna patch can change a summary without a new version)\n")
+				}
 			}
 			b.WriteString(redactionLines(redactions))
 			if _, err := io.WriteString(os.Stdout, b.String()); err != nil {

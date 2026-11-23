@@ -7,9 +7,9 @@ what was run live against real clusters.
 ## Unit & integration (mock transport)
 
 - `make ci` = `fmt-check` + `build` + `vet` + `go test ./...` + `golangci-lint` —
-  the local gate; CI runs it plus `make test-keyring` and native windows and
-  (gated) macOS jobs that build, vet and run the platform test suites
-  (`.github/workflows/ci.yml`).
+  the local gate; CI runs it plus `make test-keyring`, the darwin/windows
+  cross-compile step, and native windows and (gated) macOS jobs that build,
+  vet and run the platform test suites (`.github/workflows/ci.yml`).
 - more than 400 test functions exercise the HTTP contract against a fake
   OpenSearch (`httptest`): which endpoints are called, with what parameters and bodies —
   index creation, composable journal templates, the ingest pipeline,
@@ -21,8 +21,9 @@ what was run live against real clusters.
   where the historical bugs lived (read-after-write, read-only stores).
 - **Doc/code drift guards** — `docsync_test.go` (root package) pins the
   surfaces that review rounds kept re-finding stale: the README command/flag
-  table against the cobra tree, env-var lists in README/setup.md against what
-  `internal/config` and `docker/opensearch.yml` actually consume, ghcr image
+  table against the cobra tree (subcommand alternatives included), env-var
+  lists in README/setup.md against what our Go code (config, cmd, internal)
+  and `docker/opensearch.yml` actually consume, ghcr image
   pins agreeing everywhere, compose profiles all named in setup.md, and a
   small retired-phrase list. They run in `make ci`; when one fails after an
   intentional change, update the doc (or the curated list) so the change

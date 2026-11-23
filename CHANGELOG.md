@@ -90,7 +90,9 @@ notes).
 - re-adding an obsolete fact with the same value (a resurrection) no longer
   silently drops a passed summary: the CLI and `velruna_add` say the summary
   was ignored, same as on a plain same-value touch (a resurrection reports
-  changed=true, which had swallowed the hint).
+  changed=true, which had swallowed the hint). `velruna_add_batch` carries
+  the same honesty per item (a per-item `note`), and the lagged-resurrect
+  error names the drop in its text.
 
 ### Changed
 

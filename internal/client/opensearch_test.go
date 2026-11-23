@@ -690,6 +690,31 @@ func TestAddSummaryIgnoredFlag(t *testing.T) {
 	if res3.SummaryIgnored {
 		t.Errorf("res = %+v, want SummaryIgnored=false (no summary was given)", res3)
 	}
+	// The bug case from round 20: a same-value RESURRECTION (Changed=true)
+	// still drops the passed summary — the flag must not be derived from the
+	// verdict flags.
+	obsoleteSrc := `{"fact_id":"fid","key":"k","value":"v","category":"config","project":"proj","status":"obsolete","created_at":"2020-01-01T00:00:00Z","updated_at":"2020-01-01T00:00:00Z","observed_at":"2020-01-01T00:00:00Z"}`
+	c4, _ := newFakeClient(t, func(r recordedRequest) (int, string) {
+		if code, body := journalRoutesOK(r); code != 500 {
+			return code, body
+		}
+		switch {
+		case r.Method == "GET":
+			return 200, `{"_index":"velruna","_id":"k","found":true,"_source":` + obsoleteSrc + `}`
+		case r.Method == "POST" && strings.Contains(r.Path, "_update"):
+			return 200, `{"result":"updated"}`
+		}
+		return 500, `{"status":500,"error":"unexpected ` + r.Method + " " + r.Path + `"}`
+	})
+	f4 := model.NewFact("k", "v", "config", "proj", "", "")
+	f4.Summary = "a toc over a resurrected same value"
+	res4, err := c4.Add(context.Background(), f4)
+	if err != nil {
+		t.Fatalf("Add (same-value resurrection with summary): %v", err)
+	}
+	if !res4.Resurrected || !res4.SummaryIgnored {
+		t.Errorf("res = %+v, want resurrected and summary-ignored both true", res4)
+	}
 }
 
 // TestObsoleteMergesReasonRedactions pins the audit contract on the retire

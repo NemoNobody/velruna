@@ -29,8 +29,8 @@ import (
 )
 
 // docFiles: every user-facing .md in the repo (walked recursively so a new
-// docs subdir is covered the day it appears), minus the vendored _ref tree
-// and .git.
+// docs subdir is covered the day it appears), minus the vendored _ref tree,
+// .git, and hack/ (scratch scripts, not a published surface).
 func docFiles(t *testing.T) []string {
 	t.Helper()
 	var files []string
@@ -39,7 +39,7 @@ func docFiles(t *testing.T) []string {
 			return err
 		}
 		if d.IsDir() {
-			if p == ".git" || p == "_ref" {
+			if p == ".git" || p == "_ref" || p == "hack" {
 				return fs.SkipDir
 			}
 			return nil
@@ -137,8 +137,9 @@ func TestReadmeCommandTableMatchesCobra(t *testing.T) {
 	}
 	walk(root, "")
 
-	line := regexp.MustCompile("^\\|\\s*`velruna ([a-z-]+)((?:\\s+[a-z|-]+)?)")
+	line := regexp.MustCompile("^\\|\\s*`velruna ([a-z-]+)([^`]*)")
 	flag := regexp.MustCompile(`--([a-z][a-z-]*)`)
+	subcmd := regexp.MustCompile(`^[a-z][a-z-]*$`)
 	seenCmd := map[string]bool{}
 	for _, l := range strings.Split(readFile(t, "README.md"), "\n") {
 		m := line.FindStringSubmatch(l)
@@ -154,18 +155,20 @@ func TestReadmeCommandTableMatchesCobra(t *testing.T) {
 			continue
 		}
 		seenCmd[name] = true
-		// Subcommands/alternatives inside the command cell ("creds set\|status\|rm",
-		// "dashboards push") must be registered children too — a typo like
-		// "pulsh" is exactly the drift this table guard exists to catch.
-		for _, tok := range strings.Fields(strings.ReplaceAll(m[2], `\|`, "|")) {
-			if strings.HasPrefix(tok, "-") {
-				continue
-			}
-			for _, alt := range strings.Split(tok, "|") {
-				if alt == "" || childNames[name][alt] {
+		// The first token of the command cell is the subcommand (or the
+		// `set\|status\|rm` alternative chain — captured whole by the `[^`]*`
+		// group, then split on the normalized pipe). A typo like "pulsh" or a
+		// stale alternative is exactly the drift this guard exists to catch.
+		// Positional/flag/bracket tokens never match `subcmd` and are skipped.
+		cell := strings.ReplaceAll(m[2], `\|`, "|")
+		if toks := strings.Fields(cell); len(toks) > 0 {
+			for _, alt := range strings.Split(toks[0], "|") {
+				if alt == "" || !subcmd.MatchString(alt) {
 					continue
 				}
-				t.Errorf("README table: %q listed under %q but %s has no such subcommand", alt, name, name)
+				if !childNames[name][alt] {
+					t.Errorf("README table: %q listed under %q but %s has no such subcommand", alt, name, name)
+				}
 			}
 		}
 		for _, fm := range flag.FindAllStringSubmatch(l, -1) {
@@ -192,9 +195,8 @@ func TestReadmeCommandTableMatchesCobra(t *testing.T) {
 // (make-time inputs, external tools' knobs). Keep this map tiny: a new
 // runtime knob belongs in code, not here.
 var docOnlyEnv = map[string]bool{
-	"VELRUNA_SECURE_DEV_PASSWORD":       true, // make-time input, not a runtime knob
 	"GOTOOLCHAIN":                       true,
-	"OPENSEARCH_INITIAL_ADMIN_PASSWORD": true, // the secure compose profile's demo setup
+	"OPENSEARCH_INITIAL_ADMIN_PASSWORD": true, // a container env the secure profile SETS, never interpolates
 }
 
 // composeEnvNames: every ${NAME} interpolation in docker/opensearch.yml
