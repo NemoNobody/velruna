@@ -92,7 +92,9 @@ notes).
   did not write: the guard's rows for the input value/summary were echoed as
   if they had been stored. The answer now carries exactly the rows this
   write stored (the notes rows, on a touch); the value rows already on the
-  fact are untouched and are not re-announced.
+  fact are untouched and are not re-announced. `velruna_patch` follows the
+  same rule: a value change reports its value rows, a qualifier-only patch
+  only the rows of the fields it wrote.
 - re-adding an obsolete fact with the same value (a resurrection) no longer
   silently drops a passed summary: the CLI and `velruna_add` say the summary
   was ignored, same as on a plain same-value touch (a resurrection reports

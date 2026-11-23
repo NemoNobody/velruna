@@ -224,8 +224,8 @@ before any store contact. A high-confidence credential shape refuses the
 write; a medium-confidence heuristic hit in a text field (`value`, `notes`,
 `summary`, `notes_append`, `reason`) is replaced with
 `[velruna-redacted:pattern]`, the write proceeds, and the answer lists
-`redactions` (field/pattern/chars, never a preview) — the stored value is
-shorter than the one written. A hit in an identity field (`key`, `project`,
+`redactions` (field/pattern/chars, never a preview) — the text of the rewritten
+field is shorter than the one written. A hit in an identity field (`key`, `project`,
 `source`, `keywords`, and `superseded_by` on a patch) refuses: a rewritten
 key would silently become a different fact. A value that is nothing but a flagged span is refused. At
 `ask`, an agent that has shown the finding to the user and got explicit

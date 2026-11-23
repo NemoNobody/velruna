@@ -56,6 +56,12 @@ type PatchResult struct {
 	// Reverified: the value was re-confirmed in place (observed_at moved, the
 	// journal gained op=rediscovery, the value itself did not change).
 	Reverified bool
+	// Redactions: the secret-guard audit rows THIS patch stored (nil when it
+	// cut nothing). A value change carries the value rows; a qualifier-only
+	// patch carries the rows of the fields it actually wrote, so the answer
+	// never announces a shortened value that was not rewritten (the add
+	// touch rule, kept symmetric).
+	Redactions []model.Redaction
 }
 
 // patchScript applies only the provided params (null = untouched). The notes
@@ -519,12 +525,17 @@ func (c *Client) Patch(ctx context.Context, key string, p PatchFields) (PatchRes
 		}
 		return PatchResult{}, wrapWriteError("patch fact", err)
 	}
+	// The answer reports what this write stored, not the guard's input rows.
+	answerRedactions := qualifierRedactions
+	if valueChanged {
+		answerRedactions = p.Redactions
+	}
 	if entry != nil {
 		if _, jErr := c.appendJournalID(ctx, entry, currentRef, "", false); jErr != nil {
-			return PatchResult{Changed: valueChanged || statusChanged || p.Reverify || linkChanged, Status: newStatus, Reverified: p.Reverify}, fmt.Errorf("patch: accepted, the journal entry lagged: %w", jErr)
+			return PatchResult{Changed: valueChanged || statusChanged || p.Reverify || linkChanged, Status: newStatus, Reverified: p.Reverify, Redactions: answerRedactions}, fmt.Errorf("patch: accepted, the journal entry lagged: %w", jErr)
 		}
 	}
-	return PatchResult{Changed: valueChanged || statusChanged || p.Reverify || linkChanged, Status: newStatus, Reverified: p.Reverify}, nil
+	return PatchResult{Changed: valueChanged || statusChanged || p.Reverify || linkChanged, Status: newStatus, Reverified: p.Reverify, Redactions: answerRedactions}, nil
 }
 
 // patchUpdateParams conditions a patch on the document version pair when it

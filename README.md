@@ -379,8 +379,9 @@ credential refuses the write; a heuristic hit (an unnamed 40-character hash, a
 base64 blob, an opaque token, a weak assignment) is replaced with
 `[velruna-redacted:pattern]` before the fact is stored and listed in the
 answer's `redactions`, so a legitimate fact is not lost to a false positive —
-but the stored value is then shorter than the one written; a hit in an identity
-field (`key`, `project`, `source`, `keywords`) refuses, because a rewritten key
+but the stored text is then shorter than the one written; a hit in an identity
+field (`key`, `project`, `source`, `keywords`; `superseded_by` counts on a
+patch) refuses, because a rewritten key
 is a different fact. A secret with no
 known shape passes. The rule stays the first line
 of defense. Fetched pages get the same guard: high-confidence credential

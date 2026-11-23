@@ -359,9 +359,7 @@ func goFilesUnder(t *testing.T, dir string) []string {
 // is a conscious decision, like the retired-phrase map — if the test fires on
 // a real hint, the hint is wrong, not the guard.
 var proseAfterVelruna = map[string]bool{
-	"assumes": true, "before": true, "bug": true, "could": true,
-	"does": true, "index": true, "indices": true, "keeps": true,
-	"only": true, "processes": true, "serves": true,
+	"assumes": true, "before": true, "index": true, "indices": true,
 }
 
 // nonToolTokens: velruna_-prefixed identifiers that are stored field/key

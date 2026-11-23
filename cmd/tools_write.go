@@ -308,7 +308,7 @@ type patchInput struct {
 
 type patchOutput struct {
 	Key        string `json:"key" jsonschema:"the patched key"`
-	Changed    bool   `json:"changed" jsonschema:"true = a journaled event landed (new value, status transition, or a re-confirmation); false = qualifier-only touch"`
+	Changed    bool   `json:"changed" jsonschema:"true = a journaled event landed (new value, status transition, superseded_by link, or a re-confirmation); false = qualifier-only touch"`
 	Status     string `json:"status" jsonschema:"status of the fact after the patch"`
 	Reverified bool   `json:"reverified,omitempty" jsonschema:"true when the patch re-confirmed the value in place (observed_at moved, op=rediscovery journaled, value unchanged)"`
 	Note       string `json:"note,omitempty" jsonschema:"set on a qualifier-only touch: observed_at and age untouched, the journal not appended"`
@@ -409,11 +409,14 @@ func (s *mcpServer) patchOne(ctx context.Context, cfg *config.Config, c *client.
 		// flags into its per-item output; do not drop them (see addOne's note —
 		// the single edge cannot show them, the batch edge must).
 		if res.Changed || res.Status != "" {
-			return patchOutput{Key: in.Key, Changed: res.Changed, Status: res.Status, Reverified: res.Reverified}, writeFailure("velruna_patch", err)
+			return patchOutput{Key: in.Key, Changed: res.Changed, Status: res.Status, Reverified: res.Reverified, Redactions: res.Redactions}, writeFailure("velruna_patch", err)
 		}
 		return patchOutput{}, writeFailure("velruna_patch", err)
 	}
-	out := patchOutput{Key: in.Key, Changed: res.Changed, Status: res.Status, Reverified: res.Reverified, Redactions: redactions}
+	// Redactions come from the result (what the write stored), not from the
+	// guard's input rows: a qualifier-only patch must not announce a value row
+	// it never rewrote (the add touch rule, kept symmetric).
+	out := patchOutput{Key: in.Key, Changed: res.Changed, Status: res.Status, Reverified: res.Reverified, Redactions: res.Redactions}
 	if !res.Changed {
 		out.Note = "qualifier-only touch: observed_at and the journal untouched, the fact keeps aging (re-verify when stale)"
 	}
@@ -430,7 +433,7 @@ type patchBatchInput struct {
 type patchBatchOutput struct {
 	Count int `json:"count" jsonschema:"number of items processed"`
 	// Summary counters (the add_batch rule): what the batch actually did.
-	Changed    int              `json:"changed" jsonschema:"items that journaled an event (value change, status transition, re-confirmation)"`
+	Changed    int              `json:"changed" jsonschema:"items that journaled an event (value change, status transition, superseded_by link, re-confirmation)"`
 	Reverified int              `json:"reverified,omitempty" jsonschema:"subset of changed: items that re-confirmed the value in place"`
 	Touched    int              `json:"touched" jsonschema:"items patched on qualifiers only (no journal entry)"`
 	Items      []patchBatchItem `json:"items" jsonschema:"per-item outcome in request order; a failed item does not roll back the others"`

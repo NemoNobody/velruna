@@ -141,8 +141,13 @@ func TestPatchValueChangeCarriesRedactions(t *testing.T) {
 	c, fake := newFakeClient(t, patchRespond(source, &body))
 
 	reds := []model.Redaction{{Field: "value", Pattern: "long-hex", Chars: 48}}
-	if _, err := c.Patch(context.Background(), "k", PatchFields{Value: "id [velruna-redacted:long-hex]", Redactions: reds}); err != nil {
+	res, err := c.Patch(context.Background(), "k", PatchFields{Value: "id [velruna-redacted:long-hex]", Redactions: reds})
+	if err != nil {
 		t.Fatalf("Patch: %v", err)
+	}
+	// The answer reports what the write stored — the value rows here.
+	if len(res.Redactions) != 1 || res.Redactions[0].Field != "value" {
+		t.Errorf("res.Redactions = %+v, want the stored value row", res.Redactions)
 	}
 	params := patchParams(t, body)
 	rows, ok := params["redactions"].([]any)
@@ -163,7 +168,8 @@ func TestPatchValueChangeCarriesRedactions(t *testing.T) {
 	c2, _ := newFakeClient(t, patchRespond(
 		`{"key":"k","value":"v1","category":"config","project":"p","status":"verified","redactions":[{"field":"value","pattern":"long-hex","chars":48}]}`,
 		&cleanBody))
-	if _, err := c2.Patch(context.Background(), "k", PatchFields{Value: "clean value"}); err != nil {
+	cleanRes, err := c2.Patch(context.Background(), "k", PatchFields{Value: "clean value"})
+	if err != nil {
 		t.Fatalf("Patch clean: %v", err)
 	}
 	cleanParams := patchParams(t, cleanBody)
@@ -172,6 +178,27 @@ func TestPatchValueChangeCarriesRedactions(t *testing.T) {
 	}
 	if v := cleanParams["redactions_clear"]; v != true {
 		t.Errorf("params.redactions_clear = %v, want true", v)
+	}
+	if len(cleanRes.Redactions) != 0 {
+		t.Errorf("res.Redactions = %+v, want none on a clean value", cleanRes.Redactions)
+	}
+
+	// A qualifier-only patch reports only the rows of the fields it wrote: a
+	// summary row lands, a value row cut from the INPUT must not be announced.
+	var qualBody string
+	c3, _ := newFakeClient(t, patchRespond(
+		`{"key":"k","value":"v1","category":"config","project":"p","status":"verified"}`,
+		&qualBody))
+	qualRows := []model.Redaction{
+		{Field: "value", Pattern: "long-hex", Chars: 48},
+		{Field: "summary", Pattern: "long-hex", Chars: 48},
+	}
+	qualRes, err := c3.Patch(context.Background(), "k", PatchFields{Summary: "short toc", Redactions: qualRows})
+	if err != nil {
+		t.Fatalf("Patch qualifier: %v", err)
+	}
+	if len(qualRes.Redactions) != 1 || qualRes.Redactions[0].Field != "summary" {
+		t.Errorf("res.Redactions = %+v, want exactly the summary row", qualRes.Redactions)
 	}
 }
 

@@ -58,7 +58,7 @@ type factView struct {
 	UpdatedBy    string            `json:"updated_by,omitempty" jsonschema:"self-reported label of the last writer; the birth author fields are write-once"`
 	Notes        string            `json:"notes,omitempty" jsonschema:"qualifiers: what was checked, how far, caveats (compact mode: first 100 runes)"`
 	Keywords     []string          `json:"keywords,omitempty" jsonschema:"normalized tags (lowercase single tokens); the keyword filter of velruna_search matches these exactly"`
-	Redactions   []model.Redaction `json:"redactions,omitempty" jsonschema:"spans the write-time secret guard replaced before storing (field, pattern, chars — never the text): the stored value is SHORTER than the one written, so a reader must not take it for the complete claim"`
+	Redactions   []model.Redaction `json:"redactions,omitempty" jsonschema:"spans the write-time secret guard replaced before storing (field, pattern, chars — never the text): the text of the field named in a row is SHORTER than the one written (a value row means the fact value is not the complete claim)"`
 	ObservedAt   string            `json:"observed_at" jsonschema:"RFC3339 when the current value was observed"`
 	TTLDays      int               `json:"ttl_days,omitempty" jsonschema:"per-fact staleness override in days, when the writer chose one (otherwise the category default: config/endpoint 14, location/behavior 30, recipe 180, rule 90, context_map never)"`
 	AgeDays      int               `json:"age_days" jsonschema:"whole days since the observation; -1 when observed_at is unknown"`
