@@ -80,6 +80,7 @@ dev-opensearch-logs:
 # re-runnable (stable object ids). For any other (secured) cluster run
 # `velruna dashboards push` by hand (same credentials as the MCP server).
 dev-opensearch-dashboards:
+	@mkdir -p $(dir $(OSFILE))os-snapshots
 	$(CONTAINER) -f $(OSFILE) --profile single --profile dashboards up -d
 	@echo "waiting for Dashboards on http://127.0.0.1:$${VELRUNA_DASH_PORT:-5601} ..."
 	@ok=""; for i in $$(seq 1 60); do \
@@ -102,6 +103,7 @@ dev-opensearch-dashboards:
 # 127.0.0.1:9400/9401/9402. Point a config at it to smoke-test velruna
 # against real shard allocation.
 dev-opensearch-cluster:
+	@mkdir -p $(dir $(OSFILE))os-snapshots
 	$(CONTAINER) -f $(OSFILE) --profile cluster up -d
 
 # single node WITH security (auth/https smoke): the image installs the

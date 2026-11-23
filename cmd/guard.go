@@ -159,7 +159,8 @@ func guardRefusal(level string, findings []secretguard.Finding) error {
 }
 
 // redactionLines renders the audit rows for a human reading CLI output. It
-// names the pattern and the chars only: the removed text must not travel back
+// names the field, the pattern and the chars: the removed text must not
+// travel back
 // into the terminal (or the shell history).
 func redactionLines(rs []model.Redaction) string {
 	if len(rs) == 0 {
