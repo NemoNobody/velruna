@@ -19,7 +19,7 @@ the most welcome.
 
 ```
 go build -o velruna .     # build
-make ci                   # vet + go test ./... + golangci-lint (the CI gate)
+make ci                   # fmt-check + build + vet + go test ./... + golangci-lint (the local gate; CI adds test-keyring and cross-compiles)
 make dev-opensearch       # throwaway single-node OpenSearch (docker/podman)
 ```
 

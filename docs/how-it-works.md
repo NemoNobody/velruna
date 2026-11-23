@@ -45,7 +45,8 @@ tag filter would silently stop matching tags the analyzer splits.
 
 - `key` is the document ID. Re-adding the same key is an idempotent upsert:
   a new value points the fact at a fresh journal entry (`current_ref`,
-  doc-first); the same value updates notes/source (plus `category`, and
+  doc-first); the same value moves `notes` when supplied and records the
+  caller's `source` (plus `category` always, and
   `ttl_days`/`keywords` when given) — except an obsolete fact, whose
   re-add is a resurrection: the event is journaled and `observed_at` moves.
 - `key` should be stable, unique per fact, and written in **predictable English**
@@ -352,7 +353,7 @@ each, deduplicated in first-seen order — because the filter is a plain term on
 a `keyword` array: exact match, no analysis. That makes tags the cheapest
 cross-project slice (`velruna_search` with `keyword: "perf"` over all projects)
 and the association layer an agent needs without a graph database. An empty
-list on a re-add leaves the stored tags alone (the notes/source convention);
+list on a re-add leaves the stored tags alone (the omit-means-keep convention);
 keywords are a stored qualifier, not a journaled observation. Every accepted
 value's journal entry carries the tag set as of that moment, so re-tagging is
 safe: the previous set stays recoverable from the entry that carried it.

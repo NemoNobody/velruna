@@ -13,7 +13,7 @@ import (
 
 // LinksCmd is the link-graph namespace. superseded_by edges are guarded at
 // write time, but the guards are advisory and data predates them: this audits
-// the whole graph in one bounded read.
+// the whole graph in one bounded scan plus a batched probe round.
 func LinksCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "links",
