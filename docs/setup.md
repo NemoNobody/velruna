@@ -55,6 +55,18 @@ cannot be reached off this machine. Snapshots land in `docker/os-snapshots/`
 on the host (`path.repo` is configured). If this machine already runs
 OpenSearch on 9200, start the dev node beside it: `VELRUNA_OS_PORT=9299 make dev-opensearch`.
 
+The compose file behind the `make` targets carries six profiles; whoever
+drives `docker compose` directly needs their names:
+
+| profile | what it brings up | make target |
+|---|---|---|
+| `single` | dev single node, security off, `VELRUNA_OS_PORT` (default 9200) | `dev-opensearch` |
+| `dashboards` | dev Dashboards on top of `single` | `dev-opensearch-dashboards` |
+| `app` | the velruna container itself (the stack-up smoke: `run --rm velruna status`) | `stack-up` |
+| `cluster` | three-node `velruna-cluster` | `dev-opensearch-cluster` |
+| `secure` | single node with the security plugin on, HTTPS on 9443 | `dev-opensearch-secure` |
+| `secure-dash` | secured Dashboards on top of `secure` | `dev-opensearch-secure-dashboards` |
+
 For a dev node, `velruna.conf` uses dummy credentials with plaintext allowed
 (the file is `chmod 600`, the node is localhost-only):
 

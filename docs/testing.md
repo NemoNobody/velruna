@@ -18,6 +18,14 @@ what was run live against real clusters.
   scripts, wildcard reads with `ignore_unavailable`, search bodies.
 - The fake transport is deliberate: the contract, not OpenSearch itself, is
   where the historical bugs lived (read-after-write, read-only stores).
+- **Doc/code drift guards** — `docsync_test.go` (root package) pins the
+  surfaces that review rounds kept re-finding stale: the README command/flag
+  table against the cobra tree, env-var lists in README/setup.md against what
+  `internal/config` and `docker/opensearch.yml` actually consume, ghcr image
+  pins agreeing everywhere, compose profiles all named in setup.md, and a
+  small retired-phrase list. They run in `make ci`; when one fails after an
+  intentional change, update the doc (or the curated list) so the change
+  stays a decision, not silent drift.
 
 ## Live CLI smoke — `hack/cli-smoke.sh`
 
