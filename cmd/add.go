@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/NemoNobody/velruna/internal/client"
 	"github.com/NemoNobody/velruna/internal/config"
 	"github.com/NemoNobody/velruna/internal/model"
 
@@ -95,13 +96,7 @@ func AddCmd() *cobra.Command {
 			if err != nil {
 				fatalErr(err)
 			}
-			verb := "touched (same value)"
-			switch {
-			case res.Created:
-				verb = "added"
-			case res.Changed:
-				verb = "updated"
-			}
+			verb := addVerb(res)
 			var b strings.Builder
 			b.WriteString(verb)
 			b.WriteString(" fact: key=")
@@ -129,7 +124,7 @@ func AddCmd() *cobra.Command {
 	cmd.Flags().StringVarP(&addFlags.notes, "notes", "n", "",
 		"qualifiers: what was checked, how far, caveats")
 	cmd.Flags().StringVar(&addFlags.summary, "summary", "",
-		"short table-of-contents rendering of the value (under summary_max_len chars); required when the value is longer than summary_min_len; ignored when the value is unchanged (a same-value re-add moves notes/source when given, category always, ttl_days/keywords when given)")
+		"short table-of-contents rendering of the value (under summary_max_len chars); required when the value is longer than summary_min_len; ignored when the value is unchanged (a same-value re-add moves notes when given, records the source (default user:confirmed), category always, ttl_days/keywords when given)")
 	cmd.Flags().IntVar(&addFlags.ttlDays, "ttl-days", 0,
 		"optional staleness window in days; may only shorten the category default (config/endpoint 14, location/behavior 30, recipe 180, rule 90; context_map uncapped)")
 	cmd.Flags().StringSliceVar(&addFlags.keywords, "keyword", nil,
@@ -137,4 +132,21 @@ func AddCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&addFlags.allowSecret, "allow-secret", false,
 		"confirm the flagged text is not a secret (secret_guard=ask only, after user approval)")
 	return cmd
+}
+
+// addVerb names what the write did. The resurrection suffix keeps the CLI
+// answer honest: a same-value re-add over an obsolete fact prints "touched"
+// but flipped the status back to verified.
+func addVerb(res client.AddResult) string {
+	verb := "touched (same value)"
+	switch {
+	case res.Created:
+		verb = "added"
+	case res.Changed:
+		verb = "updated"
+	}
+	if res.Resurrected {
+		verb += ", resurrected an obsolete fact"
+	}
+	return verb
 }

@@ -117,7 +117,8 @@ func runMCPServer(confPath string) error {
 			"changed value resurrects it too: status back to verified, " +
 			"observed_at moves). Re-adding the same value is a " +
 			"touch: no journal entry, observed_at stays (staleness keeps aging — " +
-			"a re-read is not a re-verification), notes/source move when supplied " +
+			"a re-read is not a re-verification), notes move when supplied and " +
+			"source is recorded (tool:mcp when omitted) " +
 			"(plus category always, and ttl_days/keywords when given), updated_by " +
 			"moves — except an obsolete fact, whose re-add resurrects it: status " +
 			"returns to verified, observed_at moves, and the event is journaled. " +
@@ -168,7 +169,8 @@ func runMCPServer(confPath string) error {
 			"git-state corrections in a single round-trip). Per-item guard and " +
 			"confirm_secret (one approved false positive never whitewashes the " +
 			"rest); duplicate keys are rejected; partial success is legal — the " +
-			"per-item answer says changed/status/error for each. Same semantics as " +
+			"per-item answer says changed/reverified/status/redactions/error for each, " +
+			"with counters on the answer. Same semantics as " +
 			"velruna_patch.",
 	}, s.patchBatch)
 
@@ -178,7 +180,7 @@ func runMCPServer(confPath string) error {
 			"('verified') facts only. prefix keeps only keys starting with it " +
 			"(trailing * allowed; keys conventionally start with the project " +
 			"name, e.g. prefix '<project>:state:'). COMPACT by default: key/summary/" +
-			"category/status/notes-head/age rows (a project listing is the most " +
+			"category/status/source/notes-head/age rows (a project listing is the most " +
 			"expensive agent call otherwise — full values cost ~5x); compact=false " +
 			"restores full rows, velruna_get reads any single fact. SORT by default " +
 			"updated (newest activity first: 'what moved since last session'; note " +

@@ -41,7 +41,7 @@ type addInput struct {
 type addOutput struct {
 	Key     string `json:"key" jsonschema:"the stored key"`
 	Created bool   `json:"created" jsonschema:"true when the fact was newly created, false when an existing fact was updated"`
-	Changed bool   `json:"changed" jsonschema:"true when a new version was accepted (birth, value correction, status transition); false = same-value touch: notes/source move when supplied, category always, ttl_days/keywords when given; observed_at and the journal untouched"`
+	Changed bool   `json:"changed" jsonschema:"true when a new version was accepted (birth, value correction, status transition); false = same-value touch: notes move when supplied and the caller's source is recorded (this edge defaults it to tool:mcp), category always, ttl_days/keywords when given; observed_at and the journal untouched"`
 	Status  string `json:"status" jsonschema:"status of the stored fact"`
 	// PreviousSummary names the superseded version at zero journal cost:
 	// the summary the accepted correction replaced ("" when the prior fact
@@ -51,7 +51,7 @@ type addOutput struct {
 	// Note explains the least-obvious answer (a same-value touch): without
 	// it, created=false+changed=false reads like a no-op and agents mis-age
 	// the fact.
-	Note string `json:"note,omitempty" jsonschema:"what exactly this write did when the shape alone does not say (same-value touch: observed_at and age keep counting, notes/source move when supplied; resurrect: an obsolete fact re-declared alive)"`
+	Note string `json:"note,omitempty" jsonschema:"what exactly this write did when the shape alone does not say (same-value touch: observed_at and age keep counting, notes move when supplied and the caller's source is recorded; resurrect: an obsolete fact re-declared alive)"`
 	// Redactions names every span the secret guard replaced before storing
 	// (field, detector pattern, size — never the text). Non-empty means the
 	// stored value is SHORTER than the one written: the flag is not noise, it
@@ -169,7 +169,7 @@ func (s *mcpServer) addOne(ctx context.Context, cfg *config.Config, c *client.Cl
 	out := addOutput{Key: in.Key, Created: res.Created, Changed: res.Changed,
 		Status: f.Status, PreviousSummary: res.PreviousSummary, Redactions: redactions}
 	if !res.Created && !res.Changed {
-		out.Note = "same-value touch: observed_at and the journal untouched, the fact keeps aging (re-verify when stale); notes/source move when supplied, category always, ttl_days/keywords when given"
+		out.Note = "same-value touch: observed_at and the journal untouched, the fact keeps aging (re-verify when stale); notes move when supplied and the caller's source is recorded, category always, ttl_days/keywords when given"
 		if in.Summary != "" {
 			// A passed summary would rewrite the CURRENT value's table of
 			// contents without a new version — silently misleading in a
@@ -285,7 +285,7 @@ type patchInput struct {
 	Source       string   `json:"source,omitempty" jsonschema:"replaces source when non-empty"`
 	Status       string   `json:"status,omitempty" jsonschema:"verified | obsolete: a transition is journaled; a flip to obsolete is refused while other verified facts point at the target with superseded_by; obsolete→verified sets observed_at=now (re-declaring alive is a fresh verification)"`
 	Reason       string   `json:"reason,omitempty" jsonschema:"why it became obsolete (only with status=obsolete; folded into notes)"`
-	Reverify     bool     `json:"reverify,omitempty" jsonschema:"re-confirm the current value: observed_at moves to now, the journal gains op=rediscovery, the writer joins confirmed_by; cannot be combined with value/summary/status"`
+	Reverify     bool     `json:"reverify,omitempty" jsonschema:"re-confirm the current value: observed_at moves to now, the journal gains op=rediscovery, the writer joins confirmed_by; cannot be combined with value/summary/status/superseded_by"`
 	TTLDays      int      `json:"ttl_days,omitempty" jsonschema:"retune the staleness window in days (bounded by the category cap: config/endpoint 14, location/behavior 30, recipe 180, rule 90; context_map uncapped); omitted = untouched; a qualifier touch, not journaled"`
 	Keywords     []string `json:"keywords,omitempty" jsonschema:"replaces the tag set when non-empty (same normalization as add: lowercase single tokens, max 10); a qualifier touch, not journaled — the tags appear in the history with the next accepted value"`
 	SupersededBy string   `json:"superseded_by,omitempty" jsonschema:"key of the fact that replaces this one (the successor to trust instead): one link per fact, a later patch may repoint it; the target must exist and be verified and the chain must stay cycle-free; a link-only patch is journaled as op=supersede"`
