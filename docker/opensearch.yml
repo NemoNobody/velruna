@@ -21,7 +21,7 @@ services:
       - OPENSEARCH_JAVA_OPTS=-Xms${VELRUNA_OS_HEAP:-512m} -Xmx${VELRUNA_OS_HEAP:-512m}
       # snapshots land in ./os-snapshots on the host (see docs/backup.md §5:
       # snapshot before `down`, containers lose anonymous data on prune)
-      - OPENSEARCH_PATH_REPO=/snapshots
+      - path.repo=/snapshots
     volumes:
       # named volume: survives `compose down` (anonymous volumes get pruned)
       - velruna-os-data:/usr/share/opensearch/data
@@ -133,7 +133,7 @@ services:
       - cluster.initial_cluster_manager_nodes=opensearch-node1,opensearch-node2,opensearch-node3
       - DISABLE_SECURITY_PLUGIN=true
       - OPENSEARCH_JAVA_OPTS=-Xms${VELRUNA_OS_HEAP:-512m} -Xmx${VELRUNA_OS_HEAP:-512m}
-      - OPENSEARCH_PATH_REPO=/snapshots
+      - path.repo=/snapshots
     volumes:
       - velruna-os-n1-data:/usr/share/opensearch/data
       - ./os-snapshots:/snapshots
@@ -155,7 +155,7 @@ services:
       - cluster.initial_cluster_manager_nodes=opensearch-node1,opensearch-node2,opensearch-node3
       - DISABLE_SECURITY_PLUGIN=true
       - OPENSEARCH_JAVA_OPTS=-Xms${VELRUNA_OS_HEAP:-512m} -Xmx${VELRUNA_OS_HEAP:-512m}
-      - OPENSEARCH_PATH_REPO=/snapshots
+      - path.repo=/snapshots
     volumes:
       - velruna-os-n2-data:/usr/share/opensearch/data
       - ./os-snapshots:/snapshots
@@ -172,7 +172,7 @@ services:
       - cluster.initial_cluster_manager_nodes=opensearch-node1,opensearch-node2,opensearch-node3
       - DISABLE_SECURITY_PLUGIN=true
       - OPENSEARCH_JAVA_OPTS=-Xms${VELRUNA_OS_HEAP:-512m} -Xmx${VELRUNA_OS_HEAP:-512m}
-      - OPENSEARCH_PATH_REPO=/snapshots
+      - path.repo=/snapshots
     volumes:
       - velruna-os-n3-data:/usr/share/opensearch/data
       - ./os-snapshots:/snapshots

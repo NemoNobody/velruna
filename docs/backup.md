@@ -80,13 +80,14 @@ curl -k -u "admin:$OPENSEARCH_PASSWORD" -X POST \
   "https://127.0.0.1:9200/_snapshot/velruna-fs/backup-YYYYMMDD/_restore" \
   -H 'Content-Type: application/json' \
   -d '{"indices":"velruna,velruna-history-*","include_global_state":false,
+       "ignore_unavailable":true,
        "rename_pattern":"velruna","rename_replacement":"velruna-restore-test",
        "index_settings":{"index.number_of_replicas":0}}'
 ```
 
 (`rename_pattern` is a prefix regex: `velruna-history-2026.11` restores as
-`velruna-restore-test-history-2026.11`; `ignore_unavailable` on the snapshot
-covers stores that never wrote a journal entry.)
+`velruna-restore-test-history-2026.11`; `ignore_unavailable` lets a store
+that never wrote a journal entry restore without the missing pattern.)
 
 (OpenSearch `_restore` has no `wait_for_status` parameter — Elasticsearch
 recipes using it fail with 400 here.)
@@ -97,8 +98,8 @@ Verify, then clean up:
 velruna status                              # the real index is untouched
 curl -k -u "admin:$OPENSEARCH_PASSWORD" "https://127.0.0.1:9200/velruna-restore-test/_count?pretty"
 # compare _count with the live index, sample a known key with velruna get, then:
-curl -k -u "admin:$OPENSEARCH_PASSWORD" -X DELETE \
-  "https://127.0.0.1:9200/velruna-restore-test"
+curl -X DELETE \
+  "http://127.0.0.1:9200/velruna-restore-test,velruna-restore-test-history-*"
 ```
 
 A full recovery (store lost): create the index name as it was (the mapping is
@@ -123,13 +124,15 @@ Containers lose data when the operator cleans up. Two rules:
   container's `opensearch.yml` the same way as above (bind-mount the directory
   so copying it out is trivial).
 
-The compose stack already declares `/snapshots` (`OPENSEARCH_PATH_REPO`) and
-bind-mounts it at `./os-snapshots`. Register the repository on that location
-once:
+The compose stack already declares `/snapshots` (`path.repo`; the image
+entrypoint forwards only dotted lowercase env keys) and bind-mounts it at
+`./os-snapshots`. Register the repository on that location once (the dev
+profile runs plain HTTP with the security plugin off; a secure profile keeps
+the `-k -u "admin:$OPENSEARCH_PASSWORD"` form):
 
 ```bash
-curl -k -u "admin:$OPENSEARCH_PASSWORD" -X PUT \
-  "https://127.0.0.1:9200/_snapshot/velruna-fs" \
+curl -X PUT \
+  "http://127.0.0.1:9200/_snapshot/velruna-fs" \
   -H 'Content-Type: application/json' \
   -d '{"type":"fs","settings":{"location":"/snapshots","compress":true}}'
 ```
