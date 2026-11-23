@@ -390,6 +390,16 @@ func (c *Client) Add(ctx context.Context, f *model.Fact) (AddResult, error) {
 		// set", and the journaled snapshot must state what the doc will hold.
 		stated.Keywords = existing.Keywords
 	}
+	// The audit rows a correction stores: value and summary are rewritten
+	// unconditionally, notes only when supplied — an omitted notes field keeps
+	// the stored notes (marker and all), so its rows must survive. The same
+	// merge as the patch path, kept symmetric (round-27 finding).
+	correctionRewritten := []string{"value", "summary"}
+	if f.Notes != "" {
+		correctionRewritten = append(correctionRewritten, "notes")
+	}
+	correctionRedactions := model.MergeRedactions(existing.Redactions, correctionRewritten, f.Redactions)
+	stated.Redactions = correctionRedactions
 	// The correction script leaves the successor link alone; the entry states
 	// the doc's link, not the request's empty field (a correction must not
 	// read as "this fact lost its successor").
@@ -407,11 +417,11 @@ func (c *Client) Add(ctx context.Context, f *model.Fact) (AddResult, error) {
 	if len(f.Keywords) > 0 {
 		kwParam = f.Keywords
 	}
-	// nil when the guard cut nothing: the script removes the field, so a clean
-	// value never inherits the audit of the value it replaced.
+	// nil when the stored audit is empty: the script removes the field, so a
+	// clean value never inherits the rows of the value it replaced.
 	var redactionsParam interface{}
-	if len(f.Redactions) > 0 {
-		redactionsParam = f.Redactions
+	if len(correctionRedactions) > 0 {
+		redactionsParam = correctionRedactions
 	}
 
 	body, _ := json.Marshal(map[string]interface{}{

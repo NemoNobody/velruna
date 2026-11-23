@@ -761,6 +761,62 @@ func TestAddTouchReportsOnlyStoredRedactions(t *testing.T) {
 	}
 }
 
+// TestAddCorrectionKeepsUntouchedNotesRows: a value correction rewrites the
+// value and the summary, not the notes. An omitted notes field keeps the
+// stored notes (marker and all), so its audit rows must survive the write —
+// the same merge the patch path applies (round-28 pro finding: the audit row
+// of a marker still present in the text was dropped).
+func TestAddCorrectionKeepsUntouchedNotesRows(t *testing.T) {
+	src := `{"fact_id":"fid","key":"k","value":"v1","category":"config","project":"proj","status":"verified","notes":"note with [velruna-redacted:long-hex]","redactions":[{"field":"notes","pattern":"long-hex","chars":48}]}`
+	c, fake := newFakeClient(t, func(r recordedRequest) (int, string) {
+		if code, body := journalRoutesOK(r); code != 500 {
+			return code, body
+		}
+		switch {
+		case r.Method == "GET":
+			return 200, `{"_index":"velruna","_id":"k","found":true,"_source":` + src + `}`
+		case r.Method == "POST" && strings.Contains(r.Path, "_update"):
+			return 200, `{"result":"updated"}`
+		}
+		return 500, `{"status":500,"error":"unexpected ` + r.Method + " " + r.Path + `"}`
+	})
+	f := model.NewFact("k", "v2", "config", "proj", "", "")
+	f.Redactions = []model.Redaction{{Field: "value", Pattern: "long-base64", Chars: 44}}
+	if _, err := c.Add(context.Background(), f); err != nil {
+		t.Fatalf("Add (correction keeping notes): %v", err)
+	}
+	updates := fake.requestsFor("POST", "/velruna/_update/k")
+	if len(updates) != 1 {
+		t.Fatalf("updates = %d, want 1", len(updates))
+	}
+	var body struct {
+		Script struct {
+			Params struct {
+				Redactions []model.Redaction `json:"redactions"`
+			} `json:"params"`
+		} `json:"script"`
+	}
+	if err := json.Unmarshal([]byte(updates[0].Body), &body); err != nil {
+		t.Fatalf("update body: %v (%s)", err, updates[0].Body)
+	}
+	// Exactly two rows: the kept notes row (unchanged) and the new value row —
+	// no duplicate, no dropped field, the row contents travel intact.
+	rows := body.Script.Params.Redactions
+	if len(rows) != 2 {
+		t.Fatalf("stored redactions = %+v, want 2 rows (kept notes + new value)", rows)
+	}
+	byField := map[string]model.Redaction{}
+	for _, r := range rows {
+		byField[r.Field] = r
+	}
+	if got := byField["notes"]; got.Pattern != "long-hex" || got.Chars != 48 {
+		t.Errorf("notes row = %+v, want the stored row kept intact", got)
+	}
+	if got := byField["value"]; got.Pattern != "long-base64" || got.Chars != 44 {
+		t.Errorf("value row = %+v, want the new row", got)
+	}
+}
+
 // TestObsoleteMergesReasonRedactions pins the audit contract on the retire
 // path: rows cut from the reason land on the fact next to the CURRENT value's
 // rows (a retirement does not rewrite the value), a row of the same field is

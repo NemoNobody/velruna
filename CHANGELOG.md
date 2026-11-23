@@ -99,7 +99,9 @@ notes).
   fact are untouched and are not re-announced. `velruna_patch` follows the
   same rule: a value change reports the rows of the text fields it wrote (the
   rows of an untouched notes field stay with the fact), a qualifier-only
-  patch only the rows of the fields it wrote.
+  patch only the rows of the fields it wrote. An `add` correction that leaves
+  `notes` alone keeps that field's audit rows too (the stored text still
+  carries the marker).
 - re-adding an obsolete fact with the same value (a resurrection) no longer
   silently drops a passed summary: the CLI and `velruna_add` say the summary
   was ignored, same as on a plain same-value touch (a resurrection reports

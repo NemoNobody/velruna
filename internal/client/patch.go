@@ -57,10 +57,11 @@ type PatchResult struct {
 	// journal gained op=rediscovery, the value itself did not change).
 	Reverified bool
 	// Redactions: the secret-guard audit rows THIS patch stored (nil when it
-	// cut nothing). A value change carries the value rows; a qualifier-only
+	// cut nothing). A value change carries the rows of the text fields it
+	// wrote (value plus any summary/notes it supplied); a qualifier-only
 	// patch carries the rows of the fields it actually wrote, so the answer
-	// never announces a shortened value that was not rewritten (the add
-	// touch rule, kept symmetric).
+	// never announces a rewritten value that was not touched (the add touch
+	// rule, kept symmetric).
 	Redactions []model.Redaction
 }
 

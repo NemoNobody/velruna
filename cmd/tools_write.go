@@ -312,9 +312,10 @@ type patchOutput struct {
 	Status     string `json:"status" jsonschema:"status of the fact after the patch"`
 	Reverified bool   `json:"reverified,omitempty" jsonschema:"true when the patch re-confirmed the value in place (observed_at moved, op=rediscovery journaled, value unchanged)"`
 	Note       string `json:"note,omitempty" jsonschema:"set on a qualifier-only touch: observed_at and age untouched, the journal not appended"`
-	// Redactions: what this patch stored — the value rows on a value change,
-	// the rows of the fields a qualifier-only patch wrote.
-	Redactions []model.Redaction `json:"redactions,omitempty" jsonschema:"audit rows this patch stored: the value rows on a value change, the rows of the fields a qualifier-only patch wrote"`
+	// Redactions: what this patch stored — on a value change the rows of the
+	// text fields it wrote (value plus any summary/notes it supplied), on a
+	// qualifier-only patch the fields it wrote.
+	Redactions []model.Redaction `json:"redactions,omitempty" jsonschema:"audit rows this patch stored: on a value change the rows of the text fields it wrote (value plus any summary/notes supplied); on a qualifier-only patch the fields it wrote"`
 }
 
 func (s *mcpServer) patch(ctx context.Context, req *mcp.CallToolRequest, in patchInput) (*mcp.CallToolResult, patchOutput, error) {
