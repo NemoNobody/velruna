@@ -64,7 +64,7 @@ type fetchDocOutput struct {
 	// change?" needs the difference.
 	Revalidated bool                `json:"revalidated,omitempty" jsonschema:"true when the origin answered 304 Not Modified and the stored snapshot was kept (timestamps moved; a larger max_chars may have re-extracted more text from the saved html)"`
 	Truncated   bool                `json:"truncated,omitempty" jsonschema:"extraction hit a limit: the stored text is a prefix"`
-	Via         string              `json:"via,omitempty" jsonschema:"route that served the fetch when not direct: proxy | obscura (audit; obscura means the content was browser-rendered)"`
+	Via         string              `json:"via,omitempty" jsonschema:"route that produced the doc when not direct: proxy | obscura | exec (exec = captured command output)"`
 	Sections    []docSectionOutline `json:"sections,omitempty" jsonschema:"outline: pull a section with velruna_get_doc(hash, section)"`
 
 	// Chars is the stored text and CharsTotal the text extracted before the
@@ -216,10 +216,13 @@ type getDocInput struct {
 }
 
 type getDocOutput struct {
-	Found     bool   `json:"found" jsonschema:"false when no stored doc has this hash"`
-	Hash      string `json:"hash,omitempty"`
-	URL       string `json:"url,omitempty"`
-	Title     string `json:"title,omitempty"`
+	Found bool   `json:"found" jsonschema:"false when no stored doc has this hash"`
+	Hash  string `json:"hash,omitempty"`
+	URL   string `json:"url,omitempty"`
+	Title string `json:"title,omitempty"`
+	// Via is the same route audit velruna_fetch_doc reports; a captured exec
+	// document reads back with via=exec, not as a fetched page.
+	Via       string `json:"via,omitempty" jsonschema:"route that produced the doc when not direct: direct | proxy | obscura | exec (exec = captured command output)"`
 	Stale     bool   `json:"stale,omitempty" jsonschema:"past TTL: refresh with velruna_fetch_doc before quoting"`
 	Truncated bool   `json:"truncated,omitempty" jsonschema:"extraction hit a limit: the stored text is a prefix"`
 	// GuardMediumIgnored surfaces the doc-route leniency recorded at fetch
@@ -290,6 +293,7 @@ func (s *mcpServer) getDoc(ctx context.Context, req *mcp.CallToolRequest, in get
 		Hash:               doc.URLHash,
 		URL:                doc.URL,
 		Title:              doc.Title,
+		Via:                viaOut(doc),
 		Stale:              doc.Stale(now),
 		Truncated:          doc.Truncated,
 		GuardMediumIgnored: doc.GuardMediumIgnored,

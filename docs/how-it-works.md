@@ -109,6 +109,39 @@ runes per `velruna_get_doc` answer (one block is returned whole even when it
 alone exceeds the cap), a partial outline (the first 60 lines plus `more N
 blocks, orders X..Y`) on a huge document — are read limits, not storage limits.
 
+## Worksets (work queues)
+
+A workset is a named, ordered list of references to facts — a shared queue for
+agents working on one project. It stores no fact values: an entry is a
+`fact_id` plus a workflow phase (`todo | in_progress | blocked | testing | done |
+cancelled`), the author who entered that phase (`phase_by`) and its timestamp.
+The fact's trust state is computed on read (`fact_state` = `verified` /
+`obsolete` / `missing`), so a stale fact is visible without touching the queue.
+
+Two rules make the queue safe to share: `done` is reachable only through
+`testing` ("made" and "checked" stay distinct), and a claim in `in_progress` or
+`blocked` can be changed only by its owner — another author may release it to
+`todo`, take it over explicitly, or wait for the staleness window
+(`workset_takeover_seconds`). Every composition and phase change is journaled;
+cursor movement is not. Renaming keeps the old slug as an alias, so another
+agent's saved handle keeps working. See [worksets.md](worksets.md).
+
+## Command output capture (`exec`)
+
+`velruna exec -- <cmd>` runs a command inside velruna and stores the merged
+stdout+stderr in the docs index as blocks. Only a short summary (status, exit
+code, bytes, hash, block count) enters the terminal, so a long build log or test
+run does not flood an agent's context; the full text is read back with
+`velruna doc <hash> <n>` or searched with `velruna docs`.
+
+The capture is keyed by `sha256(cwd NUL argv)` (the resolved directory and
+every argv element joined with NUL separators) and re-running an unchanged
+command answers `unchanged` without rewriting the stored blocks. Output passes
+the same secret guard as other writes, `--max-bytes` caps the stored text
+(head+tail, and truncation is always reported), and `--timeout` kills a runaway
+command. There is deliberately no MCP tool for it: the server must not spawn
+processes. See [exec.md](exec.md).
+
 ## Commands
 
 ### add

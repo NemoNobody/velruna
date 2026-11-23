@@ -87,6 +87,9 @@ func clearEnv(t *testing.T) {
 		"VELRUNA_ALLOW_PLAINTEXT",
 		"VELRUNA_DOCS_INDEX",
 		"VELRUNA_DOCS_TTL_DAYS",
+		"VELRUNA_WORKSETS_INDEX",
+		"VELRUNA_WORKSETS_HISTORY_PERIOD",
+		"VELRUNA_WORKSET_TAKEOVER_SECONDS",
 		"VELRUNA_FETCH_TIMEOUT",
 		"VELRUNA_FETCH_MAX_BYTES",
 		"VELRUNA_FETCH_BLOCK_CHARS",
@@ -208,6 +211,17 @@ func TestDefaultConfig(t *testing.T) {
 	}
 	if cfg.FetchDocChars != 100_000 {
 		t.Errorf("FetchDocChars = %d, want default 100000", cfg.FetchDocChars)
+	}
+	if cfg.WorksetsIndexName != "velruna-worksets" {
+		t.Errorf("WorksetsIndexName = %q, want velruna-worksets", cfg.WorksetsIndexName)
+	}
+	// Empty is the inheritance marker (the client falls back to
+	// HistoryIndexPeriod); a resolved value here would silently pin one period.
+	if cfg.WorksetsHistoryIndexPeriod != "" {
+		t.Errorf("WorksetsHistoryIndexPeriod = %q, want the empty inherit marker", cfg.WorksetsHistoryIndexPeriod)
+	}
+	if cfg.WorksetTakeoverSeconds != 3600 {
+		t.Errorf("WorksetTakeoverSeconds = %d, want default 3600", cfg.WorksetTakeoverSeconds)
 	}
 }
 
@@ -517,6 +531,82 @@ func TestLoadConfig_HistoryIndexPeriodBadValuesAreErrors(t *testing.T) {
 	t.Setenv("VELRUNA_HISTORY_PERIOD", "biweekly")
 	if _, err := LoadConfig(); err == nil {
 		t.Error("LoadConfig() = nil error for VELRUNA_HISTORY_PERIOD=biweekly, want error")
+	}
+}
+
+// TestLoadConfig_Worksets pins the three workset settings: file values load,
+// the env overrides them, and an explicitly empty worksets_history_index_period
+// stays the inheritance marker instead of being resolved at load time.
+func TestLoadConfig_Worksets(t *testing.T) {
+	dir := t.TempDir()
+	restore := chdir(t, dir)
+	defer restore()
+	clearEnv(t)
+	fc := filepath.Join(dir, "velruna.conf")
+	if err := os.WriteFile(fc, []byte(`{
+  "worksets_index_name": "file-worksets",
+  "worksets_history_index_period": "",
+  "workset_takeover_seconds": 600,
+  "history_index_period": "day"
+}`), 0644); err != nil {
+		t.Fatalf("write velruna.conf: %v", err)
+	}
+	cfg, err := LoadConfig()
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	if cfg.WorksetsIndexName != "file-worksets" {
+		t.Errorf("WorksetsIndexName = %q, want the file value", cfg.WorksetsIndexName)
+	}
+	if cfg.WorksetsHistoryIndexPeriod != "" {
+		t.Errorf("WorksetsHistoryIndexPeriod = %q, want the empty inherit marker", cfg.WorksetsHistoryIndexPeriod)
+	}
+	if cfg.HistoryIndexPeriod != PeriodDay {
+		t.Errorf("HistoryIndexPeriod = %q, want the file's day", cfg.HistoryIndexPeriod)
+	}
+	if cfg.WorksetTakeoverSeconds != 600 {
+		t.Errorf("WorksetTakeoverSeconds = %d, want the file's 600", cfg.WorksetTakeoverSeconds)
+	}
+
+	t.Setenv("VELRUNA_WORKSETS_INDEX", "env-worksets")
+	t.Setenv("VELRUNA_WORKSETS_HISTORY_PERIOD", "week")
+	t.Setenv("VELRUNA_WORKSET_TAKEOVER_SECONDS", "120")
+	cfg, err = LoadConfig()
+	if err != nil {
+		t.Fatalf("LoadConfig (env): %v", err)
+	}
+	if cfg.WorksetsIndexName != "env-worksets" {
+		t.Errorf("WorksetsIndexName = %q, want the env override", cfg.WorksetsIndexName)
+	}
+	if cfg.WorksetsHistoryIndexPeriod != PeriodWeek {
+		t.Errorf("WorksetsHistoryIndexPeriod = %q, want the env week", cfg.WorksetsHistoryIndexPeriod)
+	}
+	if cfg.WorksetTakeoverSeconds != 120 {
+		t.Errorf("WorksetTakeoverSeconds = %d, want the env 120", cfg.WorksetTakeoverSeconds)
+	}
+}
+
+// TestLoadConfig_WorksetsBadValuesAreErrors: a typo in the journal period would
+// split the worksets journal under a second naming scheme, and a zero takeover
+// window would defeat the ownership lock. Both must fail at load.
+func TestLoadConfig_WorksetsBadValuesAreErrors(t *testing.T) {
+	cases := []struct{ name, env, value string }{
+		{"history period", "VELRUNA_WORKSETS_HISTORY_PERIOD", "fortnight"},
+		{"takeover zero", "VELRUNA_WORKSET_TAKEOVER_SECONDS", "0"},
+		{"takeover negative", "VELRUNA_WORKSET_TAKEOVER_SECONDS", "-5"},
+		{"takeover non-numeric", "VELRUNA_WORKSET_TAKEOVER_SECONDS", "soon"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			restore := chdir(t, dir)
+			defer restore()
+			clearEnv(t)
+			t.Setenv(tc.env, tc.value)
+			if _, err := LoadConfig(); err == nil || !strings.Contains(err.Error(), tc.env) {
+				t.Fatalf("LoadConfig = %v, want an error naming %s", err, tc.env)
+			}
+		})
 	}
 }
 

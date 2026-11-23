@@ -8,6 +8,36 @@ notes).
 
 ## Unreleased
 
+### Added
+
+- `velruna workset create|list|show|add|remove|phase|rename|delete|cursor` and
+the nine `velruna_workset_*` MCP tools: named, ordered queues of fact
+references with a six-phase workflow (`todo`, `in_progress`, `blocked`,
+`testing`, `done`, `cancelled`), an ownership lock with explicit/stale
+takeover, per-agent cursors, a journaled audit trail and alias-preserving
+rename. Stored in separate `velruna-worksets` / `velruna-worksets-history-*`
+indices with their own schema marker.
+- `velruna exec -- <cmd>`: runs a command and stores the merged output in the
+docs index, printing only a summary; deduplicates by resolved `cwd+argv` and
+content hash, guards secrets before storing, caps stored text (`--max-bytes`,
+head+tail, truncation reported) and kills a runaway command (`--timeout`).
+- config: `worksets_index_name` (default `velruna-worksets`),
+`worksets_history_index_period` (empty inherits `history_index_period`) and
+`workset_takeover_seconds` (default 3600), with the matching
+`VELRUNA_WORKSETS_*` / `VELRUNA_WORKSET_TAKEOVER_SECONDS` env overrides.
+
+### Fixed
+
+- `exec`: a command that exits 0 while a child still holds the output pipes
+(`exec.ErrWaitDelay`) no longer loses the capture; the full write-guard policy
+now redacts medium-confidence shapes in the stored output and title; `--key` is
+scanned at high confidence only (a 64-hex key is accepted); an `unchanged`
+answer reports the stored copy's size and truncation state; truncated captures
+cut at rune boundaries, so the stored text stays valid UTF-8 and `SizeRaw`
+matches it; the summary prints `timed_out`; a truncated exec document's read
+hint points at `--max-bytes --force`, and `via=exec` is documented in the
+`model.Doc` route enum and the `velruna_get_doc` schema.
+
 ## v0.9.1 — 2026-11-23
 
 ### Added

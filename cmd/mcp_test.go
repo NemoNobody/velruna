@@ -105,6 +105,9 @@ var wantTools = []string{
 	"velruna_prune", "velruna_obsolete",
 	"velruna_journal", "velruna_history_info",
 	"velruna_fetch_doc", "velruna_get_doc", "velruna_search_docs",
+	"velruna_workset_create", "velruna_workset_list", "velruna_workset_show",
+	"velruna_workset_add", "velruna_workset_remove", "velruna_workset_phase",
+	"velruna_workset_rename", "velruna_workset_delete", "velruna_workset_cursor",
 }
 
 func TestMCPServerExposesAllTools(t *testing.T) {
