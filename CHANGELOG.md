@@ -8,6 +8,8 @@ notes).
 
 ## Unreleased
 
+## v0.9.1 — 2026-11-23
+
 ### Added
 
 - `server.json`: the server is published to the official MCP Registry as
