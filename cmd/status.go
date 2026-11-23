@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"os/user"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -60,6 +61,12 @@ var statusEnvVars = []string{
 // permWarning flags a plaintext password living in a file that group/others
 // can read. The store is plaintext by design; the file must not be.
 func permWarning(cfg *config.Config, configFile string) string {
+	if runtime.GOOS == "windows" {
+		// POSIX mode bits do not exist there: every file reports rw-rw-rw-
+		// and os.Chmod only toggles the read-only flag. Windows protection is
+		// an NTFS ACL question the tool cannot read or advise as a mode.
+		return ""
+	}
 	if !cfg.FileHasPlaintext || cfg.FilePerm&0o077 == 0 || configFile == "" {
 		return ""
 	}

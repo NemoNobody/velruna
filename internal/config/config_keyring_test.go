@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/NemoNobody/velruna/internal/keyring"
@@ -277,8 +278,13 @@ func TestSetConfigValuePreservesTheFile(t *testing.T) {
 		len(doc["fetch_allow_hosts"].([]any)) != 1 {
 		t.Errorf("rewritten config lost something: %s", data)
 	}
-	if fi, err := os.Stat(conf); err != nil || fi.Mode().Perm() != 0o600 {
-		t.Errorf("config mode = %v (%v), want 600", fi.Mode(), err)
+	// Windows has no POSIX mode bits: every file reports rw-rw-rw- and
+	// Chmod only toggles the read-only flag, so the 600 contract is asserted
+	// on platforms that have the model (the same guard permWarning uses).
+	if runtime.GOOS != "windows" {
+		if fi, err := os.Stat(conf); err != nil || fi.Mode().Perm() != 0o600 {
+			t.Errorf("config mode = %v (%v), want 600", fi.Mode(), err)
+		}
 	}
 	// Idempotent: a second write of the same value is a no-op.
 	before, _ := os.ReadFile(conf)
