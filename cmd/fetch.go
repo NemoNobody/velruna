@@ -478,7 +478,9 @@ func printDocOutline(w io.Writer, doc *model.Doc, cached, revalidated bool, now 
 			// dropped image refs or a single oversized block has nothing to add.
 			hint = "; store the whole page with --max-chars 0"
 		}
-		b.WriteString("truncated: true (extraction hit a limit; the stored text is a prefix" + hint + ")\n")
+		b.WriteString("truncated: true (extraction hit a limit; the stored text is a prefix")
+		b.WriteString(hint)
+		b.WriteString(")\n")
 	}
 	if doc.FullChars > 0 {
 		// How much of the page the snapshot holds: the stored text vs the text

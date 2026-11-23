@@ -17,6 +17,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+from typing import IO
 
 BIN = str(Path(__file__).resolve().parent.parent / "velruna")
 KEY = "demo:api:port"
@@ -31,12 +32,19 @@ def main() -> int:
         stderr=subprocess.PIPE,
         bufsize=0,
     )
+    # Popen types every pipe as Optional; with the PIPE arguments set the
+    # streams always exist. Assert once so the helpers below type-check and a
+    # broken spawn fails loudly instead of on the first write.
+    assert proc.stdin is not None and proc.stdout is not None and proc.stderr is not None
+    stdin: IO[bytes] = proc.stdin
+    stdout: IO[bytes] = proc.stdout
+    stderr: IO[bytes] = proc.stderr
 
     buf = b""
 
     def send(obj) -> None:
-        proc.stdin.write(json.dumps(obj).encode() + b"\n")
-        proc.stdin.flush()
+        stdin.write(json.dumps(obj).encode() + b"\n")
+        stdin.flush()
 
     def await_msg(timeout: float):
         nonlocal buf
@@ -45,10 +53,10 @@ def main() -> int:
             remaining = deadline - time.time()
             if remaining <= 0:
                 return None
-            readable, _, _ = select.select([proc.stdout], [], [], remaining)
+            readable, _, _ = select.select([stdout], [], [], remaining)
             if not readable:
                 return None
-            chunk = os.read(proc.stdout.fileno(), 1 << 16)
+            chunk = os.read(stdout.fileno(), 1 << 16)
             if not chunk:
                 return None
             buf += chunk
@@ -120,13 +128,13 @@ def main() -> int:
         if fact.get("superseded_by") != "demo:api:new":
             failures.append("superseded_by roundtrip")
 
-    proc.stdin.close()
+    stdin.close()
     try:
         proc.wait(timeout=5)
     except subprocess.TimeoutExpired:
         proc.kill()
     print("server exit :", proc.returncode)
-    err = proc.stderr.read().decode(errors="replace").strip()
+    err = stderr.read().decode(errors="replace").strip()
     if err:
         print("stderr      :", err[:500])
     if failures:

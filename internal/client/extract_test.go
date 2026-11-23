@@ -513,7 +513,9 @@ func TestExtractImageCapReportsTruncation(t *testing.T) {
 		var b strings.Builder
 		b.WriteString("<html><body><h2>Pictures</h2><p>Text next to the images.</p>")
 		for i := 0; i < n; i++ {
-			b.WriteString(`<img src="/i` + strings.Repeat("x", i%5+1) + `.png">`)
+			b.WriteString(`<img src="/i`)
+			b.WriteString(strings.Repeat("x", i%5+1))
+			b.WriteString(`.png">`)
 		}
 		b.WriteString(`</body></html>`)
 		return b.String()
@@ -987,7 +989,11 @@ func TestExtractLinkMenuIsARail(t *testing.T) {
 	b.WriteString(`<html><body><div><p>`)
 	for i := 0; i < 20; i++ {
 		label := "v" + strings.Repeat("x", 4) + string(rune('a'+i))
-		b.WriteString(`<a href="/` + label + `">` + label + `</a> / `)
+		b.WriteString(`<a href="/`)
+		b.WriteString(label)
+		b.WriteString(`">`)
+		b.WriteString(label)
+		b.WriteString(`</a> / `)
 	}
 	b.WriteString(`</p></div><h2>Body</h2><p>Real body text of the page.</p></body></html>`)
 	secs, _, _ := ExtractSections(b.String())
