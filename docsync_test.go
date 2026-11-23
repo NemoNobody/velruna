@@ -158,7 +158,6 @@ func TestReadmeCommandTableMatchesCobra(t *testing.T) {
 
 	line := regexp.MustCompile("^\\|\\s*`velruna ([a-z-]+)([^`]*)")
 	flag := regexp.MustCompile(`--([a-z][a-z-]*)`)
-	short := regexp.MustCompile(`(?:^|[\s\[(])-([A-Za-z])(?:[\s\])]|$)`)
 	subcmd := regexp.MustCompile(`^[a-z][a-z-]*$`)
 	seenCmd := map[string]bool{}
 	for _, l := range strings.Split(readFile(t, "README.md"), "\n") {
@@ -202,9 +201,21 @@ func TestReadmeCommandTableMatchesCobra(t *testing.T) {
 		}
 		// Shorthands are validated on the command cell only (the description
 		// column's prose is full of hyphens; the cell is where flags live).
-		for _, sm := range short.FindAllStringSubmatch(cell, -1) {
-			if !subtreeShorts[name][sm[1]] {
-				t.Errorf("README table: -%s listed for %q but no registered flag in its subtree has that shorthand", sm[1], name)
+		// A manual scan (no lookahead in Go regexp) so adjacent flags like
+		// "[-p -q]" are both checked.
+		for i := 0; i+1 < len(cell); i++ {
+			if cell[i] != '-' || !isASCIILetter(cell[i+1]) {
+				continue
+			}
+			if i > 0 {
+				c := cell[i-1]
+				if c != ' ' && c != '\t' && c != '[' && c != '(' {
+					continue
+				}
+			}
+			sh := cell[i+1 : i+2]
+			if !subtreeShorts[name][sh] {
+				t.Errorf("README table: -%s listed for %q but no registered flag in its subtree has that shorthand", sh, name)
 			}
 		}
 	}
@@ -315,6 +326,10 @@ func codeEnvNames(t *testing.T) map[string]bool {
 		t.Fatal("code env scan parsed zero os.Getenv/LookupEnv calls — the scan itself broke")
 	}
 	return names
+}
+
+func isASCIILetter(c byte) bool {
+	return c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z'
 }
 
 // goFilesUnder returns the non-test .go files under dir (sorted).

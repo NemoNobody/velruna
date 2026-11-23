@@ -109,8 +109,8 @@ func linksSummaryLine(rep *client.LinksReport, limit int) string {
 // linksVerdict is the closing line: "clean" only for a fully audited graph.
 func linksVerdict(rep *client.LinksReport) string {
 	if len(rep.Findings) > 0 {
-		return "repair: velruna_patch {key, superseded_by: <live verified target>} to repoint, " +
-			"or retire the source as well"
+		return "repair: repoint with the MCP tool velruna_patch {key, superseded_by: <live verified target>}, " +
+			"or retire the source too (velruna obsolete <key>)"
 	}
 	if rep.Skipped > 0 || rep.Truncated {
 		return "no broken edges among the audited links; the graph was NOT fully audited (see the counts above)"

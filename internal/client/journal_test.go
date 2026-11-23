@@ -708,6 +708,9 @@ func TestResurrectAppendCollisionIsNotSuccess(t *testing.T) {
 	// typed answer is discarded at the MCP error edge) — pin the hint.
 	f := model.NewFact("k", "v", "config", "p", "s", "")
 	f.Summary = "a toc the same-value resurrect must drop"
+	// A row the guard cut from the INPUT value must not be announced: the
+	// resurrect writes the status/attrs, never the value.
+	f.Redactions = []model.Redaction{{Field: "value", Pattern: "long-hex", Chars: 40}}
 	res, err := c.Add(context.Background(), f)
 	if err == nil || !strings.Contains(err.Error(), "resurrection accepted") || !strings.Contains(err.Error(), "journal append") {
 		t.Fatalf("resurrect over a 409 uuid append must report the lagged entry, got: %v", err)
@@ -717,6 +720,9 @@ func TestResurrectAppendCollisionIsNotSuccess(t *testing.T) {
 	}
 	if !res.SummaryIgnored {
 		t.Errorf("res.SummaryIgnored = false, want true on a lagged same-value resurrect")
+	}
+	if len(res.Redactions) != 0 {
+		t.Errorf("res.Redactions = %+v, want none: the value row was never written", res.Redactions)
 	}
 	if !res.Changed {
 		t.Errorf("res.Changed = false, want true (the resurrect itself landed): %v", err)

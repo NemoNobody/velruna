@@ -19,7 +19,8 @@ notes).
   read, edges it never fetched, and edges fetched but left unaudited at
   `--limit` are counted apart; raising `--limit` recovers the second and
   third kinds, never edges beyond the 10000-hit result window. Repair by repointing the source
-  (`velruna_patch superseded_by`) or retiring it too.
+  (the MCP `velruna_patch` with `superseded_by`) or retiring it too
+  (`velruna obsolete`, the CLI-executable half).
 - retire guard: `velruna_obsolete` and a `velruna_patch` status flip to
   `obsolete` are refused while other verified facts point at the target with
   `superseded_by` (a self-link never blocks) — the refusal names the referrers

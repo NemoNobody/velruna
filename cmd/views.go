@@ -166,7 +166,7 @@ type factsOutput struct {
 	// Hint is navigation advice: an agent that gets a bare 0 starts guessing,
 	// and a compact search answer with hits feeds the same loop by pointing at
 	// velruna_get. A pointer to the right tool ends both.
-	Hint string `json:"hint,omitempty" jsonschema:"a navigation hint: always present on a zero-hit answer; a compact search answer with hits also carries one"`
+	Hint string `json:"hint,omitempty" jsonschema:"a navigation hint: present on a zero-hit search/list answer; a compact search answer with hits also carries one"`
 	// Truncated is the honest page signal: the store matched more than the
 	// page delivered. For list/keys the page is the navigation cap (1000),
 	// for search it is the requested limit — the advice differs, and an

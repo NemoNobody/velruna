@@ -106,19 +106,7 @@ func AddCmd() *cobra.Command {
 			b.WriteString(" project=")
 			b.WriteString(strconv.Quote(project))
 			b.WriteString("\n")
-			if res.SummaryIgnored {
-				// Same contract as the MCP note: the passed summary is dropped on
-				// a same-value write (it would rewrite the current value's table
-				// of contents without a new version) — including a same-value
-				// resurrection, which reports Changed=true. The advice must be
-				// executable FROM THE CLI (there is no `velruna patch` command;
-				// only the MCP edge may name velruna_patch).
-				if res.Resurrected {
-					b.WriteString("note: the --summary value was ignored (the stored value was unchanged; re-add with a corrected value to set a summary)\n")
-				} else {
-					b.WriteString("note: the --summary value was ignored on a same-value touch (correct the value to change its summary)\n")
-				}
-			}
+			b.WriteString(addSummaryNote(res))
 			// Print what the store actually holds for THIS write: on a same-value
 			// touch the guard's value/summary rows never landed, and echoing them
 			// would claim a shortening that did not happen (round-23 finding).
@@ -142,6 +130,22 @@ func AddCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&addFlags.allowSecret, "allow-secret", false,
 		"confirm the flagged text is not a secret (secret_guard=ask only, after user approval)")
 	return cmd
+}
+
+// addSummaryNote is the dropped-summary hint line ("" when nothing was
+// dropped). An ignored summary would rewrite the current value's table of
+// contents without a new version — including on a same-value resurrection,
+// which reports Changed=true, so the caller cannot infer the drop. The
+// advice must be executable FROM THE CLI: there is no `velruna patch`
+// command (only the MCP edge may name velruna_patch).
+func addSummaryNote(res client.AddResult) string {
+	if !res.SummaryIgnored {
+		return ""
+	}
+	if res.Resurrected {
+		return "note: the --summary value was ignored (the stored value was unchanged; re-add with a corrected value to set a summary)\n"
+	}
+	return "note: the --summary value was ignored on a same-value touch (correct the value to change its summary)\n"
 }
 
 // addVerb names what the write did. The resurrection suffix keeps the CLI
