@@ -46,7 +46,7 @@ staleness in context. The store never decides.
 | Tool | Purpose |
 |---|---|
 | `velruna_status` | is the store reachable; never fails — `ok=false` plus a hint |
-| `velruna_list <project>` | all facts of a project — session start |
+| `velruna_list <project>` | verified facts of a project — session start (`status: "any"` includes obsolete) |
 | `velruna_keys [prefix] [match]` | key navigation: prefix and/or substring, across projects (search does **not** match keys) |
 | `velruna_search <query>` | search in `value`, `notes` and `summary` (not in keys) |
 | `velruna_get <key>` | exact key (`found=false` when absent) |
@@ -166,7 +166,7 @@ plan comes back without `confirm: true`; write only after the user approves.
   **replaced** with `[velruna-redacted:pattern]` and the write proceeds — the
   answer lists `redactions` (field, pattern, chars, never the text), so the
   stored value is shorter than what you sent; a hit in an identity field
-  (`key`/`project`/`source`/`keywords`) refuses, and so does a value that is
+  (`key`/`project`/`source`/`keywords`; `superseded_by` counts on a patch) refuses, and so does a value that is
   nothing but a flagged span. Detection is best effort: never store
   passwords, tokens, keys, or customer data. This rule is on you, not on the
   store.

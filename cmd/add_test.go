@@ -45,8 +45,8 @@ func TestAddSummaryNoteNamesTheDrop(t *testing.T) {
 		t.Errorf("resurrect note = %q, want the unchanged-value wording, not the touch phrasing", resurrect)
 	}
 	for _, s := range []string{touch, resurrect} {
-		if strings.Contains(s, "velruna patch") {
-			t.Errorf("note = %q names a command the CLI does not have", s)
+		if strings.Contains(s, "velruna patch") || strings.Contains(s, "velruna_patch") {
+			t.Errorf("note = %q names a patch action; the CLI has no patch command and the note must stay CLI-executable", s)
 		}
 	}
 }

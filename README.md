@@ -71,7 +71,8 @@ Each fact carries evidence, not verdicts:
   "this key is stale garbage, read that one instead" without copying the value;
 - **secret guard**: writes scan for credential-like text (the index is
   plaintext) — a real credential refuses the write, a hit in an identity field
-  (key, project, source, keywords) also refuses, while a heuristic hit (a long
+  (key, project, source, keywords; `superseded_by` counts on `velruna_patch`)
+  also refuses, while a heuristic hit (a long
   hash, a base64 blob, an opaque token, a weak assignment) is replaced in
   place and the answer lists what was cut; `reject` by default, `ask` lets a
   human confirm a false positive, `allow` opts out;

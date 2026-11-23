@@ -37,7 +37,7 @@ func FetchCmd() *cobra.Command {
 		Long: `Download a page, extract readable text into sections, store it in the
 docs index, and print the outline (title, sections, hash). A second fetch of
 the same URL returns the stored snapshot (cache) until its TTL expires;
---refresh forces a new download.
+--refresh forces a revalidation (a 304 keeps the stored snapshot).
 
 Only the outline is printed: section text is read on demand with
 'velruna doc <hash> <n>'. Requests send no cookies and no credentials.
@@ -104,7 +104,7 @@ A host outside fetch_allow_hosts is rejected before the request is made.`,
 		},
 	}
 	cmd.Flags().BoolVar(&fetchFlags.refresh, "refresh", false,
-		"force a fresh download even when a stored snapshot exists")
+		"force a revalidation even when a stored snapshot exists (a 304 answer keeps it)")
 	cmd.Flags().StringVarP(&fetchFlags.project, "project", "p", "",
 		"tag the document with this project")
 	cmd.Flags().BoolVar(&fetchFlags.allowSecret, "allow-secret", false,

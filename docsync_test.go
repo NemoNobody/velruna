@@ -209,7 +209,9 @@ func TestReadmeCommandTableMatchesCobra(t *testing.T) {
 			}
 			if i > 0 {
 				c := cell[i-1]
-				if c != ' ' && c != '\t' && c != '[' && c != '(' {
+				switch c {
+				case ' ', '\t', '[', '(', '|', ',', '/', ']':
+				default:
 					continue
 				}
 			}

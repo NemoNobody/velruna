@@ -20,7 +20,7 @@ import (
 type fetchDocInput struct {
 	URL     string `json:"url" jsonschema:"page url to fetch; a missing scheme becomes https, utm_* parameters are stripped"`
 	Project string `json:"project,omitempty" jsonschema:"tag the document with this project"`
-	Refresh bool   `json:"refresh,omitempty" jsonschema:"force a fresh download even when a stored snapshot exists"`
+	Refresh bool   `json:"refresh,omitempty" jsonschema:"force a revalidation even when a stored snapshot exists (a 304 answer keeps it)"`
 
 	// MaxChars and BlockChars override the configured extraction limits for
 	// this call (fetch_doc_chars, fetch_block_chars). Pointers: 0 is a

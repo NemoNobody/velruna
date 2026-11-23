@@ -39,7 +39,8 @@ scan says so. Exit codes distinguish outcomes: 0 when no findings exist
 (the closing line says when the graph was not fully audited), 1 when
 findings exist, 2 when the check itself failed (unreachable store) —
 scripts can branch on them without parsing stderr. Repair a finding by
-repointing the source (velruna_patch superseded_by) or retiring it too.
+repointing the source (the MCP tool velruna_patch with superseded_by)
+or retiring it too.
 Run it occasionally; the write guards prevent most breaks but never all
 of them.`, client.LinkScanDefault, client.LinkScanMax),
 		Args: cobra.NoArgs,

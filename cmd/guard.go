@@ -153,7 +153,7 @@ func guardRefusal(level string, findings []secretguard.Finding) error {
 		b.WriteString("--allow-secret (CLI) or confirm_secret=true (MCP) only after their explicit approval.")
 	} else {
 		b.WriteString("Remove the flagged text and retry; this mode (secret_guard=reject) has no confirmation flag. ")
-		b.WriteString("A match in a key, project, source or tag cannot be redacted (those fields are matched on): rename it.")
+		b.WriteString("A match in a key, project, source, tag or superseded_by link cannot be redacted (those fields are matched on): rename it.")
 	}
 	return errors.New(b.String())
 }

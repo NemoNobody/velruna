@@ -54,9 +54,10 @@ type addOutput struct {
 	Note string `json:"note,omitempty" jsonschema:"what exactly this write did when the shape alone does not say (same-value touch: observed_at and age keep counting, notes move when supplied and the caller's source is recorded; resurrect: an obsolete fact re-declared alive)"`
 	// Redactions names every span the secret guard replaced IN THIS WRITE
 	// (field, detector pattern, chars — never the text). On a create or a
-	// correction that is the value that landed; on a same-value touch only
-	// the notes rows can appear (the value and the summary were not written),
-	// so a non-empty list is never a claim about text that did not change.
+	// correction these are the rows of the text this write stored (the value
+	// and the notes/summary it accepted); on a same-value touch only the
+	// notes rows can appear (the value and the summary were not written), so
+	// a non-empty list is never a claim about text that did not change.
 	Redactions []model.Redaction `json:"redactions,omitempty" jsonschema:"audit rows this write stored: spans the secret guard replaced (field, pattern, chars); a touch reports only the notes rows it rewrote"`
 }
 

@@ -649,7 +649,7 @@ such as `password = someVarName`):
 
 | Level | Behavior |
 |-------|----------|
-| `reject` (default) | a high-confidence credential refuses the write; a medium-confidence heuristic hit in a TEXT field (`value`, `notes`, `summary`, `notes_append`, `reason`) is replaced in place — the write proceeds and the answer lists `redactions`; a hit in an IDENTITY field (`key`, `project`, `source`, `keywords`) refuses, because a rewritten key would silently become a different fact; there is no confirmation flag |
+| `reject` (default) | a high-confidence credential refuses the write; a medium-confidence heuristic hit in a TEXT field (`value`, `notes`, `summary`, `notes_append`, `reason`) is replaced in place — the write proceeds and the answer lists `redactions`; a hit in an IDENTITY field (`key`, `project`, `source`, `keywords`; `superseded_by` counts on a patch) refuses, because a rewritten key would silently become a different fact; there is no confirmation flag |
 | `ask` | the same, except an explicit confirmation stores the text as written: `--allow-secret` (CLI) / `confirm_secret: true` (MCP) — an agent must show the masked finding to the user first |
 | `allow` | scanning is off; a deliberate opt-out for shared stores |
 
