@@ -80,8 +80,20 @@ notes).
   `cli-smoke`, pushes the dashboard bundle and checks every panel through the
   cluster.
 
+### Fixed
+
+- dev compose stack: snapshots work. The profiles set `path.repo=/snapshots`
+  (the image entrypoint forwards only dotted lowercase env keys), so
+  `docker/os-snapshots` is a real snapshot location; the docs' backup recipe
+  registers `velruna-fs` on it instead of pointing at a location the node
+  never declared.
+
 ### Changed
 
+- CLI `velruna add` names a resurrection: a write that re-declares an obsolete
+  fact alive prints `updated, resurrected an obsolete fact`, instead of
+  leaving the status flip invisible in the one-line answer (every
+  resurrection path reports `changed=true`, so a bare `updated` would hide it).
 - `creds get` is gone: the password is never printed. MCP learns it through
   the keyring; scripts read `OPENSEARCH_PASSWORD`.
 - load-time trim parity: `opensearch_user` and `opensearch_cluster` are
@@ -93,8 +105,9 @@ notes).
   an obsolete fact, and the error text names it (`correction accepted
   (resurrecting an obsolete fact), the journal entry lagged`) — at the MCP
   error edge the text is the only surface. The add note texts describe the
-  same-value touch exactly (notes/source when supplied, `category` always,
-  `ttl_days`/`keywords` when given); batch item errors carry only the batch
+  same-value touch exactly (notes move when supplied and the caller's source
+  is recorded, `category` always, `ttl_days`/`keywords` when given); batch
+  item errors carry only the batch
   label, not the `velruna_add` prefix.
 
 ## v0.8.10 — 2026-11-21

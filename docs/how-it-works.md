@@ -92,7 +92,8 @@ loss.
 applied and before the secret-guard hook redacts it: it does not depend on
 `max_chars`, `block_chars` or a redaction, so the same page keeps its identity
 regardless of how much of it was stored. `full_chars` is the post-redaction
-length of that text (it describes what actually ships, like `size`).
+length of that whole text (a complete snapshot reports `size == full_chars`);
+`size` is the stored text that actually ships.
 
 When a stored copy was cut by the budget and a larger `max_chars` is requested,
 the text is re-extracted from the stored raw HTML with no network. The guard
@@ -131,8 +132,9 @@ means "not given", never "erase": neither overwrites a stored value (the
 Patch contract) — on the touch path the qualifiers are not kept in history,
 so such a wipe would be irreversible. The CLI fills `--source` with
 `user:confirmed` (and the MCP add edge with `tool:mcp`) when none is given,
-so a same-value touch records that label — pass an explicit value (or run
-the client API with an empty one) to keep the stored provenance. A value over
+so a same-value touch records that label — pass an explicit value to replace
+it; only a client-API call with an empty source keeps the stored provenance.
+A value over
 `summary_min_len` requires `--summary`
 (the store's table of contents, see below).
 
@@ -701,8 +703,9 @@ Guarantees and limits:
   silent. On the API route medium findings still REFUSE the write (an API body
   quoting a token is a real leak class): at `ask` a finding can be confirmed,
   at `reject` there is no bypass. Redaction runs before the stored `size`
-  and `full_chars` are measured, so both describe exactly the text that
-  ships; `content_hash` is computed over the pre-redaction extracted text,
+  and `full_chars` are measured, so both are post-redaction (`size` is the
+  stored text, `full_chars` the whole page, equal until the budget truncates);
+  `content_hash` is computed over the pre-redaction extracted text,
   so a redaction never changes the page's identity. Every redacted field (agent-visible text and the stored raw
   HTML) is redacted in a high-confidence pass applied twice: the second pass
   closes the common overlap-tail case (a span starting inside an earlier

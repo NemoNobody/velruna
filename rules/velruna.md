@@ -87,10 +87,13 @@ separate docs index. See `docs/mcp.md` — this rule is about the facts.
   `observed_at` = now (on an obsolete fact this also resurrects it: status
   back to `verified`). That is a correction, not a loss.
 - **Same key + same value** → no journal entry and `observed_at` stays (the
-  observation is old, the note is new); `notes`/`source`/`keywords`/`ttl_days`
-  move only when supplied, while `category` is rewritten by every add (it sets
-  the TTL base). The exception is a dead fact: re-declaring it alive
-  is a resurrection and is journaled.
+  observation is old, the note is new); `notes`/`keywords`/`ttl_days`
+  move when supplied, `category` is rewritten by every add (it sets
+  the TTL base), and `source` is always recorded from the calling edge
+  (CLI default `user:confirmed`, MCP default `tool:mcp`), so a re-add
+  through a different surface moves the provenance label too. The
+  exception is a dead fact: re-declaring it alive is a resurrection and is
+  journaled.
 - **Subject gone** → `velruna_obsolete <key> [reason]`: value and `observed_at`
   are kept, the reason is appended to `notes`.
 - **Subject back** → `velruna_add` resurrects it: `obsolete` → `verified`, the
@@ -160,7 +163,7 @@ plan comes back without `confirm: true`; write only after the user approves.
   a credential-shaped value **refuses** the write; a heuristic hit (a long
   hash/base64/opaque token, a weak `password = …`) in a text field is
   **replaced** with `[velruna-redacted:pattern]` and the write proceeds — the
-  answer lists `redactions` (field, pattern, size, never the text), so the
+  answer lists `redactions` (field, pattern, chars, never the text), so the
   stored value is shorter than what you sent; a hit in an identity field
   (`key`/`project`/`source`/`keywords`) refuses, and so does a value that is
   nothing but a flagged span. Detection is best effort: never store

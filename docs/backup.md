@@ -98,8 +98,8 @@ Verify, then clean up:
 velruna status                              # the real index is untouched
 curl -k -u "admin:$OPENSEARCH_PASSWORD" "https://127.0.0.1:9200/velruna-restore-test/_count?pretty"
 # compare _count with the live index, sample a known key with velruna get, then:
-curl -X DELETE \
-  "http://127.0.0.1:9200/velruna-restore-test,velruna-restore-test-history-*"
+curl -k -u "admin:$OPENSEARCH_PASSWORD" -X DELETE \
+  "https://127.0.0.1:9200/velruna-restore-test,velruna-restore-test-history-*"
 ```
 
 A full recovery (store lost): create the index name as it was (the mapping is
@@ -126,13 +126,21 @@ Containers lose data when the operator cleans up. Two rules:
 
 The compose stack already declares `/snapshots` (`path.repo`; the image
 entrypoint forwards only dotted lowercase env keys) and bind-mounts it at
-`./os-snapshots`. Register the repository on that location once (the dev
-profile runs plain HTTP with the security plugin off; a secure profile keeps
-the `-k -u "admin:$OPENSEARCH_PASSWORD"` form):
+`./os-snapshots`. The dev profile runs plain HTTP with the security plugin
+off, so its calls drop `-k -u` and use `http://127.0.0.1:9200` (or
+`$VELRUNA_OS_PORT`); the `secure` profile declares no snapshot mount, so
+register a location it actually holds out of `path.repo` there.
+Register the repository on the dev location once:
 
 ```bash
 curl -X PUT \
   "http://127.0.0.1:9200/_snapshot/velruna-fs" \
   -H 'Content-Type: application/json' \
   -d '{"type":"fs","settings":{"location":"/snapshots","compress":true}}'
+
+# the §2 snapshot/status/prune calls, same scheme and no auth on this profile
+curl -X PUT \
+  "http://127.0.0.1:9200/_snapshot/velruna-fs/backup-$(date +%Y%m%d)?wait_for_completion=true" \
+  -H 'Content-Type: application/json' \
+  -d '{"indices":"velruna,velruna-history-*,velruna-docs","ignore_unavailable":true,"include_global_state":false}'
 ```
