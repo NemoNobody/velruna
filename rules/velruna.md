@@ -53,6 +53,7 @@ staleness in context. The store never decides.
 | `velruna_add <key> <value> [category] [project] [source] [notes]` | upsert (categories: location, config, endpoint, behavior, context_map, recipe, rule — unknown ones are rejected); long values require a `summary` (see below) |
 | `velruna_add_batch` | 1..10 facts in one call (session-end ritual); per-item guard, partial success |
 | `velruna_patch` | partial update of an existing fact: `notes_append`, status flip (`verified`\|`obsolete`), value/source — omitted fields untouched |
+| `velruna_patch_batch` | 1..10 patches in one call (session-end ritual); per-item guard, partial success; never creates |
 | `velruna_history_info <key>` | cheap history overview: writes, rediscoveries, first/last — no entry bodies |
 | `velruna_journal <key> [limit]` | the journal: every accepted value, newest first (read it only when the history matters) |
 | `velruna_prune <key> [keep]` | drop old journal entries (destructive: plan first, `confirm=true` only after the user approves) |

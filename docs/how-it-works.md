@@ -709,7 +709,8 @@ Guarantees and limits:
   and `full_chars` are measured, so both are post-redaction (`size` is the
   stored text, `full_chars` the whole page, equal until the budget truncates);
   `content_hash` is computed over the pre-redaction extracted text,
-  so a redaction never changes the page's identity. Every redacted field (agent-visible text and the stored raw
+  so a redaction never changes the page's identity (the exception: a later
+  re-extraction from the stored, already-redacted HTML rehashes that text). Every redacted field (agent-visible text and the stored raw
   HTML) is redacted in a high-confidence pass applied twice: the second pass
   closes the common overlap-tail case (a span starting inside an earlier
   replacement); a greedy span can still swallow a scheme prefix, so a

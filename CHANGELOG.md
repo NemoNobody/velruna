@@ -77,8 +77,8 @@ notes).
 - deployment: a secured stack profile with Dashboards (`secure-dash`), server
   knobs (`VELRUNA_OS_HEAP`, `VELRUNA_CLUSTER_SEEDS`), and a
   `workflow_dispatch` smoke pipeline that boots the single-node stack, runs
-  `cli-smoke`, pushes the dashboard bundle and checks every panel through the
-  cluster.
+  `cli-smoke`, pushes the dashboard bundle and checks it through the cluster
+  (the panel count through the Dashboards API).
 
 ### Fixed
 
@@ -398,7 +398,7 @@ only escape was to turn the guard off globally.
   storing a marker in its place would let a writer believe the token was saved;
 - a **medium-confidence** hit in a text field (`value`, `notes`, `summary`,
   `notes_append`, `reason`) is replaced with `[memento-redacted:pattern]` and
-  the write proceeds; the answer lists `redactions` (field, pattern, size —
+  the write proceeds; the answer lists `redactions` (field, pattern, chars —
   never the text), and the rows are stored on the fact and in the journal
   entry of the accepted value;
 - a hit in an **identity** field (`key`, `project`, `source`, `keywords`)
@@ -549,7 +549,7 @@ Fetch guard triage and fetch v1 fixes:
   `medium` (long hex/base64, weak assignments like `password = someVarName`).
   On fetched pages: high-confidence shapes in agent-visible fields are REDACTED
   in place (marker `[memento-redacted:pattern]`) and the page is stored — the
-  answer lists `redactions` (field/pattern/size, no preview) plus a `warning`;
+  answer lists `redactions` (field/pattern/chars, no preview) plus a `warning`;
   redaction runs before `size`/`content_hash`, so metadata matches the stored
   text. Medium findings in visible text route on the stored `content_type`:
   documentation types (html/markdown/plain) keep the page and surface
