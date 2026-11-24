@@ -1,6 +1,7 @@
 # velruna
 
 [![CI](https://github.com/NemoNobody/velruna/actions/workflows/ci.yml/badge.svg)](https://github.com/NemoNobody/velruna/actions/workflows/ci.yml)
+[![Listed on mcpservers.org](https://mcpservers.org/badge.svg)](https://mcpservers.org/servers/nemonobody/velruna)
 
 Persistent, provenance-carrying memory for AI agents (and humans).
 
