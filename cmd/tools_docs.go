@@ -21,6 +21,10 @@ type fetchDocInput struct {
 	URL     string `json:"url" jsonschema:"page url to fetch; a missing scheme becomes https, utm_* parameters are stripped"`
 	Project string `json:"project,omitempty" jsonschema:"tag the document with this project"`
 	Refresh bool   `json:"refresh,omitempty" jsonschema:"force a revalidation even when a stored snapshot exists (a 304 answer keeps it)"`
+	// Probe asks for pre-fetch metadata only: nothing is stored and no doc
+	// hash comes back, so Refresh/MaxChars/BlockChars/ConfirmSecret do not
+	// apply.
+	Probe bool `json:"probe,omitempty" jsonschema:"pre-fetch probe: return status, content_type, bytes_total (-1 = unknown), bytes_sampled, method, final_url and note; nothing is stored and no hash is returned (refresh/max_chars/block_chars are ignored)"`
 
 	// MaxChars and BlockChars override the configured extraction limits for
 	// this call (fetch_doc_chars, fetch_block_chars). Pointers: 0 is a
@@ -89,6 +93,40 @@ type fetchDocOutput struct {
 	// GitHub local-clone resolution: the answer is a file on this machine.
 	Local bool   `json:"local,omitempty" jsonschema:"true when the url resolved to a file in a local git clone: Path is the file; nothing was fetched"`
 	Path  string `json:"path,omitempty" jsonschema:"local clone file path when local=true"`
+
+	// Probe answers a probe:true call: metadata only, no hash and no store
+	// write.
+	Probe *probeView `json:"probe,omitempty" jsonschema:"pre-fetch metadata when probe=true: nothing was stored and no hash was returned"`
+}
+
+// probeView is the pre-fetch metadata contract. BytesTotal keeps -1 visible
+// (no omitempty): an unknown size is an answer, not a missing field.
+type probeView struct {
+	URL          string `json:"url" jsonschema:"normalized url that was probed"`
+	FinalURL     string `json:"final_url" jsonschema:"url after redirects"`
+	Status       int    `json:"status" jsonschema:"HTTP status; a non-2xx answer is returned as-is (403/422/429 = bot wall)"`
+	ContentType  string `json:"content_type" jsonschema:"media type without parameters (empty when the origin sent none)"`
+	BytesTotal   int64  `json:"bytes_total" jsonschema:"entity size in bytes; -1 = unknown"`
+	BytesSampled int64  `json:"bytes_sampled" jsonschema:"bytes actually read (0 for a HEAD answer)"`
+	Method       string `json:"method" jsonschema:"head | range"`
+	Note         string `json:"note" jsonschema:"qualifier, e.g. the server ignored Range"`
+}
+
+// probeFromResult maps the client probe result onto the wire view.
+func probeFromResult(r *client.ProbeResult) *probeView {
+	if r == nil {
+		return nil
+	}
+	return &probeView{
+		URL:          r.URL,
+		FinalURL:     r.FinalURL,
+		Status:       r.Status,
+		ContentType:  r.ContentType,
+		BytesTotal:   r.BytesTotal,
+		BytesSampled: r.BytesSampled,
+		Method:       r.Method,
+		Note:         r.Note,
+	}
 }
 
 // viaOut hides the default route (direct) from the contract: it carries
@@ -126,6 +164,16 @@ func (s *mcpServer) fetchDoc(ctx context.Context, req *mcp.CallToolRequest, in f
 		// store write: the repo mapping is machine-specific and must never
 		// enter the shared index.
 		return nil, fetchDocOutput{Local: true, Path: p}, nil
+	}
+	if in.Probe {
+		// Metadata only: the probe re-applies normalization and the allowlist
+		// (idempotent), never touches the store, and a non-2xx answer comes
+		// back as a result so a bot wall is visible.
+		res, err := client.ProbeURL(ctx, cfg, rawURL)
+		if err != nil {
+			return nil, fetchDocOutput{}, err
+		}
+		return nil, fetchDocOutput{URL: res.URL, Probe: probeFromResult(res)}, nil
 	}
 	// The project tag is agent-supplied text that lands in a shared index,
 	// and the cache-hit path re-tags a stored doc WITHOUT the content

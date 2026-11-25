@@ -8,6 +8,28 @@ notes).
 
 ## Unreleased
 
+### Added
+
+- `velruna fetch --probe`: normalize and allowlist the url as a fetch would
+  (a fetch also consults robots.txt; a probe does not), then print
+  pre-fetch metadata (`status`, `content_type`, `bytes_total` — `unknown`
+  when the origin states none —, `bytes_sampled`, `method`, `final_url`,
+  `note`) without storing anything; HEAD first, then one 64 KiB `Range`
+  sample when HEAD is refused or the size is unknown. `--refresh`,
+  `--max-chars` and `--block-chars` are ignored, and a GitHub url that
+  matches a local clone still resolves to the local path.
+- `velruna_fetch_doc` `probe: true`: the same probe over MCP, answering a
+  object and no hash; nothing is stored, the renderer and the proxy
+  are not used, robots.txt is not consulted, and a non-2xx status is returned as-is so a bot wall
+  (403/422/429) is visible.
+
+### Changed
+
+- Reading guidance: decide between a direct fetch and the docs cache by
+  intent, not by a size check; the probe is a hint (a known size under
+  16 KiB for a one-off lookup may go direct), and bot walls plus the obscura
+  renderer are documented next to it.
+
 ## v0.9.5 — 2026-11-24
 
 ### Added
