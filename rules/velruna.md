@@ -1,6 +1,6 @@
 ---
 name: velruna-memory
-description: Persistent velruna fact store (OpenSearch, velruna_* tools). Use at session start, before re-verifying any project fact, when storing or correcting facts, when a fact is stale, and when the store is unavailable. Covers keys, statuses, staleness, notes, secret guard, degradation.
+description: Persistent velruna fact store and docs cache (OpenSearch, velruna_* tools). Use at session start, before re-verifying any project fact, when storing or correcting facts, when a fact is stale, when reading a web page (prefer fetch_doc), long command output (prefer exec) or a large file, and when the store is unavailable. Covers keys, statuses, staleness, notes, secret guard, degradation.
 ---
 
 # velruna — agent rule
@@ -29,6 +29,9 @@ Paste this into your always-on rules:
 - Long value (over `summary_min_len`) → `velruna_add` requires a `summary`: a short table-of-contents rendering (under `summary_max_len`) — search/find by summary, read the full value by key.
 - Reads return the current value only (`stale`/`age_days` included); history costs context — use `velruna_history_info` (cheap counts) and `velruna_journal` (the entries) only when the history matters. `stale: true` → re-verify against the source before trusting.
 - `velruna_prune` is destructive and manual (the journal is write-forever by design): without `confirm: true` it only returns the plan; show the plan to the user and confirm only after their approval.
+- Web page likely re-read or longer than a screen → `velruna_fetch_doc` (MCP) / `velruna fetch` (CLI), then read the needed block via `velruna_get_doc` / `velruna_search_docs`; one-off tiny page, auth/cookies or freshness-critical → direct fetch. The cache is context economy, not evidence.
+- Long/noisy command output (builds, tests, logs) → `velruna exec -- <cmd>` prints only a summary; read blocks with `velruna doc <hash> <n>`. Short output, TTY/interactive, or exact bytes → the terminal.
+- Large files/logs → `velruna exec -- cat/head/tail` + `velruna doc`; source code and anything you will edit → `read_file`/`grep` (the cache is lossy).
 - **Never store secrets** (passwords, tokens, keys) — the store is plaintext;
   a best-effort secret guard (default `reject`) scans writes, but it is not
   protection: the rule is on you.
@@ -59,9 +62,33 @@ staleness in context. The store never decides.
 | `velruna_prune <key> [keep]` | drop old journal entries (destructive: plan first, `confirm=true` only after the user approves) |
 | `velruna_obsolete <key> [reason]` | the subject is gone |
 
+### Reading: pages, command output, large files
+
 The page-cache tools (`velruna_fetch_doc`, `velruna_get_doc`,
-`velruna_search_docs`) live beside these: they store fetched web pages in a
-separate docs index. See `docs/mcp.md` — this rule is about the facts.
+`velruna_search_docs`) and `velruna exec` share one docs index. They are
+**context economy, not evidence**: a cached block is a `doc:*` pointer, and a
+stale or expired one must be refreshed before it is quoted.
+
+| Task | Prefer | Fallback |
+|---|---|---|
+| Web page: large, multi-section, or re-read | `velruna_fetch_doc` → outline → `velruna_get_doc` / `velruna_search_docs` | direct fetch for a one-off small page |
+| Command output: long, noisy, repeated | `velruna exec -- <cmd>` → summary → `velruna doc <hash> <n>` | terminal for short output |
+| Large file/log | `velruna exec -- cat/head/tail <file>` → `velruna doc` | `read_file` for small files |
+| Source code, anything you will edit | `read_file` / `grep` | — (never through the lossy cache) |
+
+- `velruna fetch` / `velruna_fetch_doc` caches a page with a TTL and a shared
+  cache: do not re-fetch the same URL; `refresh` only when the source is known
+  to have moved. The fetcher sends no cookies and no credentials, so
+  auth-gated pages are out of scope.
+- `velruna exec` runs without a shell, prints status/exit code/bytes/hash/doc
+  id, deduplicates by resolved cwd + argv + content hash (`unchanged` means the
+  stored copy was reused), keeps head+tail past `--max-bytes`, kills the
+  process group on timeout and redacts secrets before storing. Read the blocks
+  with `velruna doc`.
+- When NOT: short output; TTY/interactive programs; output you must quote byte
+  for byte (a diff, an error line) — the cache is lossy by design.
+- Source code is the hard line: truncation, redaction and dedupe make the
+  cache unsuitable for exact lines and edits.
 
 ### When to search, when to store
 
