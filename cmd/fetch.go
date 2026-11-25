@@ -24,6 +24,7 @@ var fetchFlags struct {
 	allowSecret bool
 	maxChars    int
 	blockChars  int
+	probe       bool
 }
 
 // FetchCmd returns the `velruna fetch` command: download a page, extract its
@@ -41,7 +42,13 @@ the same URL returns the stored snapshot (cache) until its TTL expires;
 
 Only the outline is printed: section text is read on demand with
 'velruna doc <hash> <n>'. Requests send no cookies and no credentials.
-A host outside fetch_allow_hosts is rejected before the request is made.`,
+A host outside fetch_allow_hosts is rejected before the request is made.
+
+With --probe, validate the url and the host as usual, then print pre-fetch
+metadata (status, content type, size, method) without storing the page.
+The probe runs HEAD, then one Range read of the first 64 KiB when HEAD is
+refused or the size is unknown. --refresh, --max-chars, --block-chars,
+--project and --allow-secret are ignored.`,
 		Args: cobra.ExactArgs(1),
 		Run: func(cmd *cobra.Command, args []string) {
 			// Validate before any store contact: a bad url or a denied host is
@@ -57,6 +64,14 @@ A host outside fetch_allow_hosts is rejected before the request is made.`,
 			}
 			if err := client.HostAllowed(cfg, rawURL); err != nil {
 				fatalErr(err)
+			}
+			if fetchFlags.probe {
+				// Pre-fetch metadata only: same url/host validation as a fetch,
+				// the same local-clone short-circuit, and no store contact.
+				if err := probeOrLocal(context.Background(), os.Stdout, cfg, rawURL); err != nil {
+					fatalErr(err)
+				}
+				return
 			}
 			if p, ok := client.GitHubLocal(cfg, rawURL); ok {
 				// The content is in a local clone: print the path and stop.
@@ -109,11 +124,63 @@ A host outside fetch_allow_hosts is rejected before the request is made.`,
 		"tag the document with this project")
 	cmd.Flags().BoolVar(&fetchFlags.allowSecret, "allow-secret", false,
 		"confirm a secret-guard finding is a false positive (secret_guard=ask only)")
+	cmd.Flags().BoolVar(&fetchFlags.probe, "probe", false,
+		"print pre-fetch metadata and exit; ignores --refresh, --max-chars, --block-chars, --project and --allow-secret and stores nothing")
 	cmd.Flags().IntVar(&fetchFlags.maxChars, "max-chars", -1,
 		"runes of extracted text to store (0 = the whole document; default: fetch_doc_chars)")
 	cmd.Flags().IntVar(&fetchFlags.blockChars, "block-chars", -1,
 		"target size of one stored block in runes (default: fetch_block_chars)")
 	return cmd
+}
+
+// probeOrLocal is the --probe entry point: a GitHub url that matches a local
+// clone still resolves to the local path (the content is on this machine, so
+// there is nothing to probe), and everything else gets a metadata probe.
+func probeOrLocal(ctx context.Context, w io.Writer, cfg *config.Config, rawURL string) error {
+	if p, ok := client.GitHubLocal(cfg, rawURL); ok {
+		return writeLine(w, "local: "+p)
+	}
+	res, err := client.ProbeURL(ctx, cfg, rawURL)
+	if err != nil {
+		return err
+	}
+	return printProbe(w, res)
+}
+
+// printProbe renders probe metadata. It deliberately prints no doc line and
+// no hash: a probe never stores anything. bytes_total is "unknown" when the
+// origin declined to state a size (-1), never a guess.
+func printProbe(w io.Writer, r *client.ProbeResult) error {
+	var b strings.Builder
+	b.WriteString("status: ")
+	b.WriteString(strconv.Itoa(r.Status))
+	b.WriteString("\ncontent_type: ")
+	b.WriteString(r.ContentType)
+	b.WriteString("\nbytes_total: ")
+	b.WriteString(bytesTotalLabel(r.BytesTotal))
+	b.WriteString("\nbytes_sampled: ")
+	b.WriteString(strconv.FormatInt(r.BytesSampled, 10))
+	b.WriteString("\nmethod: ")
+	b.WriteString(r.Method)
+	b.WriteString("\nfinal_url: ")
+	b.WriteString(r.FinalURL)
+	b.WriteString("\n")
+	if r.Note != "" {
+		b.WriteString("note: ")
+		b.WriteString(r.Note)
+		b.WriteString("\n")
+	}
+	_, err := io.WriteString(w, b.String())
+	return err
+}
+
+// bytesTotalLabel renders the probe's size field: any negative value means the
+// origin did not state one.
+func bytesTotalLabel(n int64) string {
+	if n < 0 {
+		return "unknown"
+	}
+	return strconv.FormatInt(n, 10)
 }
 
 // optionalLimit maps the flag sentinel (-1: use the configured default) to a

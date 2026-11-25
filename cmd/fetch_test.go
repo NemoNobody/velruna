@@ -2,11 +2,17 @@ package cmd
 
 import (
 	"bytes"
+	"context"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/NemoNobody/velruna/internal/client"
+	"github.com/NemoNobody/velruna/internal/config"
 	"github.com/NemoNobody/velruna/internal/model"
 )
 
@@ -236,4 +242,137 @@ func TestSnippetCapsAndCollapses(t *testing.T) {
 	if len([]rune(got)) != 11 { // 10 + ellipsis
 		t.Errorf("snippet len = %d, want 11", len([]rune(got)))
 	}
+}
+
+func TestPrintProbe(t *testing.T) {
+	var buf bytes.Buffer
+	// A probe note only ever comes from the 200 fallback (the server ignored
+	// Range); a 206 leaves Note empty, so the binding is tested on 200.
+	r := &client.ProbeResult{
+		URL:          "https://example.com/doc",
+		FinalURL:     "https://example.com/doc",
+		Status:       200,
+		ContentType:  "text/html",
+		BytesTotal:   123456,
+		BytesSampled: 65536,
+		Method:       "range",
+		Note:         "server ignored Range; sampled first 65536 bytes",
+	}
+	if err := printProbe(&buf, r); err != nil {
+		t.Fatal(err)
+	}
+	out := buf.String()
+	for _, want := range []string{
+		"status: 200",
+		"content_type: text/html",
+		"bytes_total: 123456",
+		"bytes_sampled: 65536",
+		"method: range",
+		"final_url: https://example.com/doc",
+		"note: server ignored Range",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("probe output lacks %q:\n%s", want, out)
+		}
+	}
+	// A probe never stores anything: no doc line and no hash.
+	if strings.Contains(out, "doc:") || strings.Contains(out, "hash:") {
+		t.Errorf("probe output must not carry doc/hash lines:\n%s", out)
+	}
+}
+
+func TestProbeUnknownSize(t *testing.T) {
+	var buf bytes.Buffer
+	if err := printProbe(&buf, &client.ProbeResult{Status: 200, BytesTotal: -1, Method: "head"}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(buf.String(), "bytes_total: unknown") {
+		t.Errorf("negative size must render as unknown:\n%s", buf.String())
+	}
+	// An empty note must not print an empty "note:" line.
+	if strings.Contains(buf.String(), "note:") {
+		t.Errorf("an empty note must not be printed:\n%s", buf.String())
+	}
+	if got := bytesTotalLabel(0); got != "0" {
+		t.Errorf("bytesTotalLabel(0) = %q, want 0", got)
+	}
+	if got := bytesTotalLabel(42); got != "42" {
+		t.Errorf("bytesTotalLabel(42) = %q, want 42", got)
+	}
+	if got := bytesTotalLabel(-1); got != "unknown" {
+		t.Errorf("bytesTotalLabel(-1) = %q, want unknown", got)
+	}
+}
+
+func TestFetchCmdProbeFlag(t *testing.T) {
+	saved := fetchFlags
+	t.Cleanup(func() { fetchFlags = saved })
+
+	cmd := FetchCmd()
+	f := cmd.Flags().Lookup("probe")
+	if f == nil {
+		t.Fatal("fetch has no --probe flag")
+	}
+	if !strings.Contains(f.Usage, "ignores") || !strings.Contains(f.Usage, "--max-chars") {
+		t.Errorf("probe usage must say it ignores the extraction flags: %q", f.Usage)
+	}
+	// --project and --allow-secret do not reach a probe either: they must be
+	// named in the ignored set, not silently accepted.
+	for _, flag := range []string{"--project", "--allow-secret"} {
+		if !strings.Contains(f.Usage, flag) {
+			t.Errorf("probe usage must list %s as ignored: %q", flag, f.Usage)
+		}
+	}
+	if err := cmd.ParseFlags([]string{"--probe"}); err != nil {
+		t.Fatal(err)
+	}
+	if !fetchFlags.probe {
+		t.Error("--probe did not set the flag")
+	}
+}
+
+func TestProbeOrLocalLocalClone(t *testing.T) {
+	root := t.TempDir()
+	repoDir := filepath.Join(root, "checkout", "velruna")
+	newProbeRepo(t, repoDir, "https://github.com/NemoNobody/velruna.git", "README.md")
+	cfg := &config.Config{LocalRepoRoots: []string{root}, LocalRepoScanDepth: 3}
+
+	var buf bytes.Buffer
+	url := "https://github.com/NemoNobody/velruna/blob/master/README.md"
+	if err := probeOrLocal(context.Background(), &buf, cfg, url); err != nil {
+		t.Fatalf("probeOrLocal: %v", err)
+	}
+	want := "local: " + filepath.Join(repoDir, "README.md")
+	if got := strings.TrimSpace(buf.String()); got != want {
+		t.Errorf("local clone path = %q, want %q", got, want)
+	}
+}
+
+// newProbeRepo builds a throwaway repo the GitHub-local resolver accepts:
+// a fixed branch, an origin remote, one commit.
+func newProbeRepo(t *testing.T, dir, remote string, files ...string) {
+	t.Helper()
+	run := func(args ...string) {
+		t.Helper()
+		full := append([]string{"-c", "commit.gpgsign=false", "-c", "tag.gpgsign=false"}, args...)
+		if out, err := exec.Command("git", full...).CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", full, err, out)
+		}
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	run("init", "-q", "-b", "master", dir)
+	run("-C", dir, "remote", "add", "origin", remote)
+	for _, f := range files {
+		p := filepath.Join(dir, f)
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte("content of "+f), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	run("-c", "user.email=t@t", "-c", "user.name=t", "-C", dir, "add", "-A")
+	run("-c", "user.email=t@t", "-c", "user.name=t", "-C", dir, "commit", "-q", "-m", "init")
 }

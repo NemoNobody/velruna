@@ -29,7 +29,8 @@ Paste this into your always-on rules:
 - Long value (over `summary_min_len`) → `velruna_add` requires a `summary`: a short table-of-contents rendering (under `summary_max_len`) — search/find by summary, read the full value by key.
 - Reads return the current value only (`stale`/`age_days` included); history costs context — use `velruna_history_info` (cheap counts) and `velruna_journal` (the entries) only when the history matters. `stale: true` → re-verify against the source before trusting.
 - `velruna_prune` is destructive and manual (the journal is write-forever by design): without `confirm: true` it only returns the plan; show the plan to the user and confirm only after their approval.
-- Web page likely re-read or longer than a screen → `velruna_fetch_doc` (MCP) / `velruna fetch` (CLI), then read the needed block via `velruna_get_doc` / `velruna_search_docs`; one-off tiny page, auth/cookies or freshness-critical → direct fetch. The cache is context economy, not evidence.
+- Web: default to `velruna_fetch_doc` (MCP) / `velruna fetch` (CLI) — it returns an outline and a shared cache and costs one call even for a small page; use a direct fetch only for a known one-off tiny lookup, auth/cookies, freshness-critical data, or local files. Do not guess the page size before fetching. The cache is context economy, not evidence.
+- Bot-walled page (403/422/429): with `fetch_render: "obscura"` (check `velruna status`) velruna retries through the headless browser; with `off` the block is final — report it. 404/401, allowlist, redirect limits and oversize failures are never rendered.
 - Long/noisy command output (builds, tests, logs) → `velruna exec -- <cmd>` prints only a summary; read blocks with `velruna doc <hash> <n>`. Short output, TTY/interactive, or exact bytes → the terminal.
 - Large files/logs → `velruna exec -- cat/head/tail` + `velruna doc`; source code and anything you will edit → `read_file`/`grep` (the cache is lossy).
 - **Never store secrets** (passwords, tokens, keys) — the store is plaintext;
@@ -71,7 +72,7 @@ stale or expired one must be refreshed before it is quoted.
 
 | Task | Prefer | Fallback |
 |---|---|---|
-| Web page: large, multi-section, or re-read | `velruna_fetch_doc` → outline → `velruna_get_doc` / `velruna_search_docs` | direct fetch for a one-off small page |
+| Web page: unknown, multi-section, or re-read | `velruna_fetch_doc` → outline → `velruna_get_doc` / `velruna_search_docs` | direct fetch for a known one-off tiny lookup |
 | Command output: long, noisy, repeated | `velruna exec -- <cmd>` → summary → `velruna doc <hash> <n>` | terminal for short output |
 | Large file/log | `velruna exec -- cat/head/tail <file>` → `velruna doc` | `read_file` for small files |
 | Source code, anything you will edit | `read_file` / `grep` | — (never through the lossy cache) |
@@ -80,6 +81,22 @@ stale or expired one must be refreshed before it is quoted.
   cache: do not re-fetch the same URL; `refresh` only when the source is known
   to have moved. The fetcher sends no cookies and no credentials, so
   auth-gated pages are out of scope.
+- No size pre-check is required by default: decide by intent. If you do probe,
+  treat the size only as a hint. A small page through the cache costs one call
+  and one block; re-reading a page you fetched directly costs context every
+  time.
+- `probe` is a hint, not a verdict. If `bytes_total >= 0` and `< 16 KiB` and
+  this is a one-off lookup, a direct fetch is acceptable; unknown size,
+  `>= 16 KiB`, or any read/quote/search/re-read → use `velruna fetch_doc`.
+  A probe returning 403/422/429 means the renderer question applies (check
+  `fetch_render` in `velruna status`). The probe honors the allowlist and
+  the SSRF guard, uses no renderer and no proxy, and does not consult
+  robots.txt (the real fetch does).
+- Bot walls: `fetch_render` is `off` (default) or `obscura` (an external
+  headless-browser binary, opt-in — `velruna status` shows `render=`). With
+  `obscura`, a network failure or 403/422/429 is retried through the renderer
+  and stored `via: obscura`; with `off` the block is final. 404/401, allowlist,
+  redirect limits and oversize failures are never rendered.
 - `velruna exec` runs without a shell, prints status/exit code/bytes/hash/doc
   id, deduplicates by resolved cwd + argv + content hash (`unchanged` means the
   stored copy was reused), keeps head+tail past `--max-bytes`, kills the
