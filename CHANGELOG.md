@@ -6,7 +6,7 @@ under `## Unreleased`; the release commit moves that section under its version
 number (`.github/workflows/release.yml` reads the heading to build the release
 notes).
 
-## Unreleased
+## v0.9.6 — 2026-11-25
 
 ### Added
 
